@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Callable, Mapping
+from typing import Any
 
 from src.contracts import ProviderResult
 from src.providers.official_x import OfficialXProvider
 from src.providers.socialdata import SocialDataProvider
 from src.providers.stub import StubProvider
 from src.providers.syndication import SyndicationProvider
-
 
 DEFAULT_ROUTES: dict[str, list[str]] = {
     "fetch_urls": ["syndication", "official_x", "socialdata", "apify"],

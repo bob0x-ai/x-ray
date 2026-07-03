@@ -7,7 +7,6 @@ from typing import Any
 from src.contracts import ProviderResult
 from src.router import XDataRouter
 
-
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 100
 MAX_FETCH_URLS = 25

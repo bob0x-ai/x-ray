@@ -9,7 +9,6 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal, TypeAlias
 
-
 ProviderStatus = Literal["ok", "empty", "unavailable", "error", "needs_approval"]
 
 
@@ -80,7 +79,7 @@ class ProviderResult:
         warnings: list[str] | None = None,
         cost: CostEstimate | None = None,
         metadata: dict[str, Any] | None = None,
-    ) -> "ProviderResult":
+    ) -> ProviderResult:
         if not items:
             return cls.empty(provider=provider, reason="no_results", warnings=warnings)
         return cls(
@@ -100,7 +99,7 @@ class ProviderResult:
         reason: str = "no_results",
         warnings: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
-    ) -> "ProviderResult":
+    ) -> ProviderResult:
         return cls(
             status="empty",
             provider=provider,
@@ -117,7 +116,7 @@ class ProviderResult:
         reason: str,
         warnings: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
-    ) -> "ProviderResult":
+    ) -> ProviderResult:
         return cls(
             status="unavailable",
             provider=provider,
@@ -134,7 +133,7 @@ class ProviderResult:
         reason: str,
         warnings: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
-    ) -> "ProviderResult":
+    ) -> ProviderResult:
         return cls(
             status="error",
             provider=provider,
@@ -152,7 +151,7 @@ class ProviderResult:
         cost: CostEstimate | None = None,
         warnings: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
-    ) -> "ProviderResult":
+    ) -> ProviderResult:
         return cls(
             status="needs_approval",
             provider=provider,

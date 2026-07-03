@@ -4,21 +4,19 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from html import unescape
-from typing import Any, Callable
+from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from src.contracts import Metrics, Post, ProviderResult, UserRef
 
-
 PROVIDER_NAME = "syndication"
 TWEET_RESULT_URL = "https://cdn.syndication.twimg.com/tweet-result?id={id}&token=a"
-TIMELINE_PROFILE_URL = (
-    "https://syndication.twitter.com/srv/timeline-profile/screen-name/{handle}"
-)
+TIMELINE_PROFILE_URL = "https://syndication.twitter.com/srv/timeline-profile/screen-name/{handle}"
 DEFAULT_TIMEOUT_SECONDS = 10
 USER_AGENT = "x-mcp/0.1 (+https://github.com/local/x-mcp)"
 
@@ -126,9 +124,7 @@ def post_from_payload(payload: dict[str, Any]) -> Post | None:
         return None
     author = _author_from_payload(payload)
     username = author.username if author else None
-    source_url = (
-        f"https://x.com/{username}/status/{post_id}" if username else f"https://x.com/i/web/status/{post_id}"
-    )
+    source_url = f"https://x.com/{username}/status/{post_id}" if username else f"https://x.com/i/web/status/{post_id}"
     return Post(
         id=post_id,
         text=text,

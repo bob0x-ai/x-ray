@@ -228,3 +228,65 @@ def test_insufficient_balance_maps_to_unavailable(monkeypatch):
 
     assert result.status == "unavailable"
     assert result.reason == "insufficient_balance"
+
+
+def test_non_2xx_non_dict_body_maps_to_status_not_error(monkeypatch):
+    monkeypatch.setenv("SOCIALDATA_API_KEY", "token")
+
+    def http_get(url, headers, timeout):
+        del url, headers, timeout
+        # A 404 with a JSON list (non-dict) body must still map to not_found,
+        # not to an unexpected_payload error.
+        return HttpResponse(status_code=404, text=json.dumps(["not", "a", "dict"]))
+
+    provider = SocialDataProvider(http_get=http_get)
+    result = provider.search_posts("ai", limit=1)
+
+    assert result.status == "unavailable"
+    assert result.reason == "not_found"
+
+
+def test_rate_limit_with_non_dict_body_maps_to_rate_limited(monkeypatch):
+    monkeypatch.setenv("SOCIALDATA_API_KEY", "token")
+
+    def http_get(url, headers, timeout):
+        del url, headers, timeout
+        return HttpResponse(status_code=429, text=json.dumps("rate limited string"))
+
+    provider = SocialDataProvider(http_get=http_get)
+    result = provider.fetch_urls(["1234567890"])
+
+    assert result.status == "unavailable"
+    assert result.reason == "rate_limited"
+
+
+def test_non_dict_success_body_still_returns_unexpected_payload(monkeypatch):
+    monkeypatch.setenv("SOCIALDATA_API_KEY", "token")
+
+    def http_get(url, headers, timeout):
+        del url, headers, timeout
+        return HttpResponse(status_code=200, text=json.dumps(["a", "b"]))
+
+    provider = SocialDataProvider(http_get=http_get)
+    result = provider.search_posts("ai", limit=1)
+
+    assert result.status == "error"
+    assert result.reason == "unexpected_payload"
+
+
+def test_non_2xx_dict_body_still_surfaces_message(monkeypatch):
+    monkeypatch.setenv("SOCIALDATA_API_KEY", "token")
+
+    def http_get(url, headers, timeout):
+        del url, headers, timeout
+        return HttpResponse(
+            status_code=402,
+            text=json.dumps({"status": "error", "message": "Insufficient balance"}),
+        )
+
+    provider = SocialDataProvider(http_get=http_get)
+    result = provider.fetch_urls(["1234567890"])
+
+    assert result.status == "unavailable"
+    assert result.reason == "insufficient_balance"
+    assert "Insufficient balance" in result.warnings

@@ -180,3 +180,91 @@ def test_official_provider_exposes_no_write_methods():
     forbidden = {"post", "delete", "like", "unlike", "repost", "follow", "unfollow", "dm_send"}
 
     assert forbidden.isdisjoint(set(dir(provider)))
+
+
+def test_search_recent_enforces_min_max_results_for_small_limit(monkeypatch):
+    monkeypatch.setenv("X_OAUTH2_ACCESS_TOKEN", "token")
+    captured = {}
+
+    class _Posts:
+        def search_recent(self, **kwargs):
+            captured.update(kwargs)
+            return [
+                SimpleNamespace(
+                    data=[
+                        {"id": "1", "text": "a", "author_id": "42"},
+                        {"id": "2", "text": "b", "author_id": "42"},
+                        {"id": "3", "text": "c", "author_id": "42"},
+                        {"id": "4", "text": "d", "author_id": "42"},
+                    ]
+                )
+            ]
+
+    provider = OfficialXProvider(client_factory=lambda token: SimpleNamespace(posts=_Posts()))
+    result = provider.search_recent("ai", limit=3)
+
+    assert result.status == "ok"
+    assert [item.id for item in result.items] == ["1", "2", "3"]
+    # The requested limit (3) is below the search endpoint floor (10), so the
+    # API page size must be raised to 10 even though we only keep 3 items.
+    assert captured["max_results"] == 10
+
+
+def test_search_recent_caps_request_size_at_max(monkeypatch):
+    monkeypatch.setenv("X_OAUTH2_ACCESS_TOKEN", "token")
+    captured = {}
+
+    class _Posts:
+        def search_recent(self, **kwargs):
+            captured.update(kwargs)
+            return [SimpleNamespace(data=[{"id": "1", "text": "a", "author_id": "42"}])]
+
+    provider = OfficialXProvider(client_factory=lambda token: SimpleNamespace(posts=_Posts()))
+    provider.search_recent("ai", limit=999)
+
+    assert captured["max_results"] == 100
+
+
+def test_read_user_posts_enforces_min_max_results_for_small_limit(monkeypatch):
+    monkeypatch.setenv("X_OAUTH2_ACCESS_TOKEN", "token")
+    captured = {}
+
+    class _Users:
+        def get_posts(self, **kwargs):
+            captured.update(kwargs)
+            return [
+                SimpleNamespace(
+                    data=[
+                        {"id": "1", "text": "a", "author_id": "42"},
+                        {"id": "2", "text": "b", "author_id": "42"},
+                        {"id": "3", "text": "c", "author_id": "42"},
+                    ]
+                )
+            ]
+
+    # Passing a numeric id avoids the username-resolution call.
+    provider = OfficialXProvider(client_factory=lambda token: SimpleNamespace(users=_Users()))
+    result = provider.read_user_posts("42", limit=2)
+
+    assert result.status == "ok"
+    assert [item.id for item in result.items] == ["1", "2"]
+    # The user posts endpoint floor is 5.
+    assert captured["max_results"] == 5
+
+
+def test_read_owned_timeline_enforces_min_max_results(monkeypatch):
+    monkeypatch.setenv("X_OAUTH2_ACCESS_TOKEN", "token")
+    captured = {}
+
+    class _Users:
+        def get_me(self):
+            return SimpleNamespace(data={"id": "99"})
+
+        def get_timeline(self, **kwargs):
+            captured.update(kwargs)
+            return [SimpleNamespace(data=[{"id": "1", "text": "home", "author_id": "99"}])]
+
+    provider = OfficialXProvider(client_factory=lambda token: SimpleNamespace(users=_Users()))
+    provider.read_owned_timeline(limit=3)
+
+    assert captured["max_results"] == 5

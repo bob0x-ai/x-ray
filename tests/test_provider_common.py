@@ -7,7 +7,6 @@ from src.providers.socialdata import HttpResponse as SocialDataHttpResponse
 from src.providers.socialdata import SocialDataProvider
 from src.providers.syndication import HttpResponse, SyndicationProvider
 
-
 POST_PAYLOAD = {
     "id_str": "1234567890",
     "text": "hello from x",

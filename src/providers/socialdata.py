@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
 from src.contracts import CostEstimate, Metrics, Post, ProviderResult, UserProfile, UserRef
 from src.providers.syndication import extract_post_id, normalize_handle
-
 
 PROVIDER_NAME = "socialdata"
 API_BASE_URL = "https://api.socialdata.tools/twitter"
@@ -95,9 +95,7 @@ def post_from_payload(payload: dict[str, Any]) -> Post | None:
         return None
     author = _author_from_payload(payload)
     username = author.username if author else None
-    source_url = (
-        f"https://x.com/{username}/status/{post_id}" if username else f"https://x.com/i/web/status/{post_id}"
-    )
+    source_url = f"https://x.com/{username}/status/{post_id}" if username else f"https://x.com/i/web/status/{post_id}"
     return Post(
         id=post_id,
         text=text,
@@ -481,13 +479,17 @@ class SocialDataProvider:
             except json.JSONDecodeError:
                 if 200 <= response.status_code < 300:
                     return None, ProviderResult.error(provider=self.name, reason="invalid_json")
+                # For non-2xx, a non-JSON body is fine; fall through to status mapping.
             else:
                 if isinstance(parsed, dict):
                     payload = parsed
                     if parsed.get("status") == "error":
                         message = str(parsed.get("message") or "").strip() or None
-                else:
+                elif 200 <= response.status_code < 300:
+                    # A 2xx response must be a dict payload.
                     return None, ProviderResult.error(provider=self.name, reason="unexpected_payload")
+                # A non-2xx non-dict body carries no usable payload; fall through
+                # to status-code mapping below.
 
         if 200 <= response.status_code < 300:
             if payload is None:
