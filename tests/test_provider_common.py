@@ -2,8 +2,8 @@ import os
 from contextlib import contextmanager
 from types import SimpleNamespace
 
-from x_mcp.providers.official_x import OfficialXProvider
-from x_mcp.providers.syndication import HttpResponse, SyndicationProvider
+from src.providers.official_x import OfficialXProvider
+from src.providers.syndication import HttpResponse, SyndicationProvider
 
 
 POST_PAYLOAD = {

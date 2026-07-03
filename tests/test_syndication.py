@@ -1,6 +1,6 @@
 import json
 
-from x_mcp.providers.syndication import (
+from src.providers.syndication import (
     HttpResponse,
     SyndicationProvider,
     extract_post_id,

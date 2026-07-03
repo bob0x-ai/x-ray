@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from x_mcp.providers.official_x import OfficialXProvider
+from src.providers.official_x import OfficialXProvider
 
 
 class _Users:
@@ -60,7 +60,7 @@ def test_missing_auth_returns_unavailable(monkeypatch):
 
 def test_missing_sdk_returns_unavailable_when_no_factory(monkeypatch):
     monkeypatch.setenv("X_OAUTH2_ACCESS_TOKEN", "token")
-    monkeypatch.setattr("x_mcp.providers.official_x._load_xdk_client_factory", lambda: None)
+    monkeypatch.setattr("src.providers.official_x._load_xdk_client_factory", lambda: None)
 
     result = OfficialXProvider().fetch_urls(["1234567890"])
 

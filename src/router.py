@@ -5,10 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
-from x_mcp.contracts import ProviderResult
-from x_mcp.providers.official_x import OfficialXProvider
-from x_mcp.providers.stub import StubProvider
-from x_mcp.providers.syndication import SyndicationProvider
+from src.contracts import ProviderResult
+from src.providers.official_x import OfficialXProvider
+from src.providers.stub import StubProvider
+from src.providers.syndication import SyndicationProvider
 
 
 DEFAULT_ROUTES: dict[str, list[str]] = {

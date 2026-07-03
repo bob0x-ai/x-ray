@@ -5,8 +5,8 @@ from __future__ import annotations
 import os
 from typing import Any, Callable
 
-from x_mcp.contracts import CostEstimate, Metrics, Post, ProviderResult, UserRef
-from x_mcp.providers.syndication import extract_post_id, normalize_handle
+from src.contracts import CostEstimate, Metrics, Post, ProviderResult, UserRef
+from src.providers.syndication import extract_post_id, normalize_handle
 
 
 PROVIDER_NAME = "official_x"

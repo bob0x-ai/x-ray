@@ -11,7 +11,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
-from x_mcp.contracts import Metrics, Post, ProviderResult, UserRef
+from src.contracts import Metrics, Post, ProviderResult, UserRef
 
 
 PROVIDER_NAME = "syndication"

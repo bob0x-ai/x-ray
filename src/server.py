@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from x_mcp.contracts import ProviderResult
-from x_mcp.router import XDataRouter
+from src.contracts import ProviderResult
+from src.router import XDataRouter
 
 
 DEFAULT_LIMIT = 20

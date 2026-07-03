@@ -397,12 +397,12 @@ surface. The agent sees task-level tools; the code owns backend choice.
 
 Implemented starting point:
 
-- Shared contracts: `x_mcp/contracts.py`
-- Router: `x_mcp/router.py`
-- Stub provider: `x_mcp/providers/stub.py`
-- First real providers: `x_mcp/providers/syndication.py` and
-  `x_mcp/providers/official_x.py`
-- MCP wrapper: `x_mcp/server.py`
+- Shared contracts: `src/contracts.py`
+- Router: `src/router.py`
+- Stub provider: `src/providers/stub.py`
+- First real providers: `src/providers/syndication.py` and
+  `src/providers/official_x.py`
+- MCP wrapper: `src/server.py`
 
 ## MCP Server Wrapper
 
@@ -425,11 +425,13 @@ Tool constraints:
 - `x_fetch_urls` accepts at most `25` values per call in v1.
 - Tool handlers return normalized JSON-serializable provider results.
 - `x_data_status` reports only token-safe booleans and provider status.
+- A stdio MCP integration test verifies tool listing, absence of provider
+  parameters, and `x_data_status` structured content.
 
 Local entry point:
 
 ```bash
-python -m x_mcp.server
+python -m src.server
 ```
 
 Installed console script:
@@ -444,7 +446,7 @@ Expected Hermes stdio config shape:
 mcp_servers:
   x-data:
     command: "python"
-    args: ["-m", "x_mcp.server"]
+    args: ["-m", "src.server"]
     tools:
       include:
         - x_fetch_urls

@@ -1,5 +1,5 @@
-from x_mcp.contracts import Post, ProviderResult
-from x_mcp.server import (
+from src.contracts import Post, ProviderResult
+from src.server import (
     MAX_FETCH_URLS,
     clamp_limit,
     create_mcp_server,

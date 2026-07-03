@@ -1,6 +1,6 @@
-from x_mcp.contracts import CostEstimate, Post, ProviderResult
-from x_mcp.providers.stub import StubProvider
-from x_mcp.router import XDataRouter
+from src.contracts import CostEstimate, Post, ProviderResult
+from src.providers.stub import StubProvider
+from src.router import XDataRouter
 
 
 class _Provider:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from x_mcp.contracts import ProviderResult
+from src.contracts import ProviderResult
 
 
 class StubProvider:

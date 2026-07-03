@@ -1,4 +1,4 @@
-from x_mcp.contracts import Post, ProviderResult
+from src.contracts import Post, ProviderResult
 
 
 def test_ok_with_empty_items_normalizes_to_empty():
