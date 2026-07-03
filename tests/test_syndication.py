@@ -1,0 +1,117 @@
+import json
+
+from x_mcp.providers.syndication import (
+    HttpResponse,
+    SyndicationProvider,
+    extract_post_id,
+    normalize_handle,
+)
+
+
+def test_extract_post_id_accepts_ids_and_urls():
+    assert extract_post_id("1234567890") == "1234567890"
+    assert extract_post_id("https://x.com/alice/status/1234567890") == "1234567890"
+    assert extract_post_id("https://twitter.com/alice/statuses/1234567890") == "1234567890"
+    assert extract_post_id("not-a-post") is None
+
+
+def test_normalize_handle_strips_at():
+    assert normalize_handle("@alice") == "alice"
+    assert normalize_handle(" alice ") == "alice"
+
+
+def test_fetch_urls_returns_unavailable_for_deleted_or_protected_post():
+    def http_get(url, timeout):
+        del url, timeout
+        return HttpResponse(status_code=404, text="")
+
+    provider = SyndicationProvider(http_get=http_get)
+    result = provider.fetch_urls(["https://x.com/alice/status/1234567890"])
+
+    assert result.status == "unavailable"
+    assert result.reason == "no_fetchable_posts"
+    assert "post_unavailable:1234567890" in result.warnings
+
+
+def test_fetch_urls_returns_unavailable_for_rate_limit():
+    def http_get(url, timeout):
+        del url, timeout
+        return HttpResponse(status_code=429, text="rate limited")
+
+    provider = SyndicationProvider(http_get=http_get)
+    result = provider.fetch_urls(["1234567890"])
+
+    assert result.status == "unavailable"
+    assert result.reason == "rate_limited"
+
+
+def test_fetch_urls_parses_tweet_result_json():
+    payload = {
+        "id_str": "1234567890",
+        "text": "A post",
+        "created_at": "Fri Jul 03 00:00:00 +0000 2026",
+        "user": {"id_str": "42", "screen_name": "alice", "name": "Alice"},
+        "reply_count": 1,
+        "retweet_count": 2,
+        "favorite_count": 3,
+        "quote_count": 4,
+    }
+
+    def http_get(url, timeout):
+        del timeout
+        assert "tweet-result" in url
+        return HttpResponse(status_code=200, text=json.dumps(payload))
+
+    provider = SyndicationProvider(http_get=http_get)
+    result = provider.fetch_urls(["1234567890"])
+
+    assert result.status == "ok"
+    assert result.items[0].author.username == "alice"
+    assert result.items[0].metrics.likes == 3
+
+
+def test_read_user_posts_parses_embedded_json_script():
+    html = """
+    <html><body>
+      <script type="application/json">
+      {"tweets":[{"id_str":"1","text":"one","user":{"screen_name":"alice"}},
+                 {"id_str":"2","text":"two","user":{"screen_name":"alice"}}]}
+      </script>
+    </body></html>
+    """
+
+    def http_get(url, timeout):
+        del timeout
+        assert "screen-name/alice" in url
+        return HttpResponse(status_code=200, text=html)
+
+    provider = SyndicationProvider(http_get=http_get)
+    result = provider.read_user_posts("@alice", limit=1)
+
+    assert result.status == "ok"
+    assert len(result.items) == 1
+    assert result.items[0].id == "1"
+
+
+def test_read_user_posts_empty_when_no_parseable_posts():
+    def http_get(url, timeout):
+        del url, timeout
+        return HttpResponse(status_code=200, text="<html></html>")
+
+    provider = SyndicationProvider(http_get=http_get)
+    result = provider.read_user_posts("alice")
+
+    assert result.status == "empty"
+    assert result.reason == "timeline_no_parseable_posts"
+
+
+def test_read_user_posts_returns_unavailable_for_rate_limit():
+    def http_get(url, timeout):
+        del url, timeout
+        return HttpResponse(status_code=429, text="rate limited")
+
+    provider = SyndicationProvider(http_get=http_get)
+    result = provider.read_user_posts("alice")
+
+    assert result.status == "unavailable"
+    assert result.reason == "rate_limited"
