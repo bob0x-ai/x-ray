@@ -7,7 +7,7 @@ difference between "worked but no data" and "not implemented/configured".
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, TypeAlias
 
 
 ProviderStatus = Literal["ok", "empty", "unavailable", "error", "needs_approval"]
@@ -41,6 +41,20 @@ class Post:
 
 
 @dataclass(frozen=True)
+class UserProfile:
+    id: str
+    username: str | None = None
+    name: str | None = None
+    description: str | None = None
+    public_metrics: dict[str, int] | None = None
+    source_url: str | None = None
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+ProviderItem: TypeAlias = Post | UserProfile
+
+
+@dataclass(frozen=True)
 class CostEstimate:
     amount_usd: float
     basis: str
@@ -50,7 +64,7 @@ class CostEstimate:
 class ProviderResult:
     status: ProviderStatus
     provider: str
-    items: list[Post] = field(default_factory=list)
+    items: list[ProviderItem] = field(default_factory=list)
     reason: str | None = None
     warnings: list[str] = field(default_factory=list)
     cost: CostEstimate | None = None
@@ -62,7 +76,7 @@ class ProviderResult:
         cls,
         *,
         provider: str,
-        items: list[Post],
+        items: list[ProviderItem],
         warnings: list[str] | None = None,
         cost: CostEstimate | None = None,
         metadata: dict[str, Any] | None = None,

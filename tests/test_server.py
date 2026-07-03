@@ -3,8 +3,13 @@ from src.server import (
     MAX_FETCH_URLS,
     clamp_limit,
     create_mcp_server,
+    x_collect_posts_handler,
     x_data_status_handler,
     x_fetch_urls_handler,
+    x_read_follow_graph_handler,
+    x_read_quotes_handler,
+    x_read_replies_handler,
+    x_read_thread_handler,
     x_read_user_posts_handler,
     x_search_posts_handler,
 )
@@ -24,6 +29,26 @@ class _Router:
 
     def search_posts(self, query, *, limit=20):
         self.calls.append(("search_posts", query, limit))
+        return ProviderResult.empty(provider="router", reason="all_routes_exhausted")
+
+    def read_thread(self, value, *, limit=100):
+        self.calls.append(("read_thread", value, limit))
+        return ProviderResult.empty(provider="router", reason="all_routes_exhausted")
+
+    def read_replies(self, value, *, limit=100):
+        self.calls.append(("read_replies", value, limit))
+        return ProviderResult.empty(provider="router", reason="all_routes_exhausted")
+
+    def read_quotes(self, value, *, limit=100):
+        self.calls.append(("read_quotes", value, limit))
+        return ProviderResult.empty(provider="router", reason="all_routes_exhausted")
+
+    def read_follow_graph(self, user, *, graph="followers", limit=100):
+        self.calls.append(("read_follow_graph", user, graph, limit))
+        return ProviderResult.empty(provider="router", reason="all_routes_exhausted")
+
+    def collect_posts(self, query, *, limit=100):
+        self.calls.append(("collect_posts", query, limit))
         return ProviderResult.empty(provider="router", reason="all_routes_exhausted")
 
     def status(self):
@@ -80,6 +105,33 @@ def test_search_posts_handler_returns_router_result():
 
     assert result["status"] == "empty"
     assert result["reason"] == "all_routes_exhausted"
+
+
+def test_new_handlers_validate_and_call_router():
+    router = _Router()
+
+    assert x_read_thread_handler("123", limit=999, router=router)["status"] == "empty"
+    assert x_read_replies_handler("123", limit=8, router=router)["status"] == "empty"
+    assert x_read_quotes_handler("123", limit=9, router=router)["status"] == "empty"
+    assert x_read_follow_graph_handler("@alice", graph="following", limit=10, router=router)["status"] == "empty"
+    assert x_collect_posts_handler("ai", limit=9999, router=router)["status"] == "empty"
+
+    assert router.calls == [
+        ("read_thread", "123", 100),
+        ("read_replies", "123", 8),
+        ("read_quotes", "123", 9),
+        ("read_follow_graph", "@alice", "following", 10),
+        ("collect_posts", "ai", 500),
+    ]
+
+
+def test_new_handlers_reject_missing_or_invalid_inputs():
+    assert x_read_thread_handler("", router=_Router())["reason"] == "missing_value"
+    assert x_read_replies_handler("", router=_Router())["reason"] == "missing_value"
+    assert x_read_quotes_handler("", router=_Router())["reason"] == "missing_value"
+    assert x_read_follow_graph_handler("", router=_Router())["reason"] == "missing_user"
+    assert x_read_follow_graph_handler("@alice", graph="likes", router=_Router())["reason"] == "invalid_graph"
+    assert x_collect_posts_handler("", router=_Router())["reason"] == "missing_query"
 
 
 def test_status_handler_is_token_safe_shape():

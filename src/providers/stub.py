@@ -31,6 +31,26 @@ class StubProvider:
         del limit
         return self._not_implemented("read_mentions")
 
+    def read_thread(self, value: str, *, limit: int = 100) -> ProviderResult:
+        del value, limit
+        return self._not_implemented("read_thread")
+
+    def read_replies(self, value: str, *, limit: int = 100) -> ProviderResult:
+        del value, limit
+        return self._not_implemented("read_replies")
+
+    def read_quotes(self, value: str, *, limit: int = 100) -> ProviderResult:
+        del value, limit
+        return self._not_implemented("read_quotes")
+
+    def read_follow_graph(self, user: str, *, graph: str = "followers", limit: int = 100) -> ProviderResult:
+        del user, graph, limit
+        return self._not_implemented("read_follow_graph")
+
+    def collect_posts(self, query: str, *, limit: int = 100) -> ProviderResult:
+        del query, limit
+        return self._not_implemented("collect_posts")
+
     def _not_implemented(self, task: str) -> ProviderResult:
         return ProviderResult.unavailable(
             provider=self.name,

@@ -28,6 +28,11 @@ def test_mcp_stdio_lists_tools_and_calls_status():
                     "x_search_posts",
                     "x_read_owned_timeline",
                     "x_read_mentions",
+                    "x_read_thread",
+                    "x_read_replies",
+                    "x_read_quotes",
+                    "x_read_follow_graph",
+                    "x_collect_posts",
                     "x_data_status",
                 }
                 for tool in tools.values():

@@ -3,6 +3,8 @@ from contextlib import contextmanager
 from types import SimpleNamespace
 
 from src.providers.official_x import OfficialXProvider
+from src.providers.socialdata import HttpResponse as SocialDataHttpResponse
+from src.providers.socialdata import SocialDataProvider
 from src.providers.syndication import HttpResponse, SyndicationProvider
 
 
@@ -63,6 +65,18 @@ def _providers():
 
     with _env(X_OAUTH2_ACCESS_TOKEN="token"):
         yield OfficialXProvider(client_factory=lambda token: _MockClient())
+
+    def socialdata_get(url, headers, timeout):
+        del headers, timeout
+        assert url.endswith("/tweets/1234567890")
+        import json
+
+        payload = dict(POST_PAYLOAD)
+        payload["full_text"] = payload.pop("text")
+        return SocialDataHttpResponse(status_code=200, text=json.dumps(payload))
+
+    with _env(SOCIALDATA_API_KEY="token"):
+        yield SocialDataProvider(http_get=socialdata_get)
 
 
 def test_exact_post_fetch_contract_across_providers():

@@ -35,11 +35,39 @@ class _Users:
         assert kwargs["id"] == "99"
         return [SimpleNamespace(data=[])]
 
+    def get_followers(self, **kwargs):
+        assert kwargs["id"] == "42"
+        return [
+            SimpleNamespace(
+                data=[
+                    {
+                        "id": "77",
+                        "username": "follower",
+                        "name": "Follower",
+                        "description": "reads things",
+                        "public_metrics": {"followers_count": 10, "following_count": 5, "tweet_count": 30},
+                    }
+                ]
+            )
+        ]
+
+    def get_following(self, **kwargs):
+        assert kwargs["id"] == "42"
+        return [SimpleNamespace(data=[{"id": "88", "username": "followed", "name": "Followed"}])]
+
 
 class _Posts:
     def search_recent(self, **kwargs):
-        assert kwargs["query"] == "ai"
+        assert kwargs["query"] in {
+            "ai",
+            "conversation_id:1234567890",
+            "conversation_id:1234567890 is:reply",
+        }
         return [SimpleNamespace(data=[{"id": "3", "text": "search", "author_id": "42"}])]
+
+    def get_quoted(self, **kwargs):
+        assert kwargs["id"] == "1234567890"
+        return [SimpleNamespace(data=[{"id": "4", "text": "quote", "author_id": "77"}])]
 
 
 class _Client:
@@ -99,6 +127,51 @@ def test_search_recent(monkeypatch):
 
     assert result.status == "ok"
     assert result.items[0].id == "3"
+
+
+def test_read_thread_uses_recent_conversation_search(monkeypatch):
+    monkeypatch.setenv("X_OAUTH2_ACCESS_TOKEN", "token")
+    provider = OfficialXProvider(client_factory=lambda token: _Client())
+
+    result = provider.read_thread("https://x.com/alice/status/1234567890", limit=10)
+
+    assert result.status == "ok"
+    assert result.items[0].id == "3"
+    assert "official_recent_search_only" in result.warnings
+    assert result.metadata["query"] == "conversation_id:1234567890"
+
+
+def test_read_replies_uses_recent_conversation_search(monkeypatch):
+    monkeypatch.setenv("X_OAUTH2_ACCESS_TOKEN", "token")
+    provider = OfficialXProvider(client_factory=lambda token: _Client())
+
+    result = provider.read_replies("1234567890", limit=10)
+
+    assert result.status == "ok"
+    assert result.metadata["query"] == "conversation_id:1234567890 is:reply"
+
+
+def test_read_quotes_uses_quote_endpoint(monkeypatch):
+    monkeypatch.setenv("X_OAUTH2_ACCESS_TOKEN", "token")
+    provider = OfficialXProvider(client_factory=lambda token: _Client())
+
+    result = provider.read_quotes("1234567890", limit=10)
+
+    assert result.status == "ok"
+    assert result.items[0].id == "4"
+
+
+def test_read_follow_graph_returns_user_profiles(monkeypatch):
+    monkeypatch.setenv("X_OAUTH2_ACCESS_TOKEN", "token")
+    provider = OfficialXProvider(client_factory=lambda token: _Client())
+
+    result = provider.read_follow_graph("@alice", graph="followers", limit=10)
+
+    assert result.status == "ok"
+    assert result.items[0].id == "77"
+    assert result.items[0].username == "follower"
+    assert result.items[0].public_metrics["followers_count"] == 10
+    assert result.metadata["graph"] == "followers"
 
 
 def test_official_provider_exposes_no_write_methods():

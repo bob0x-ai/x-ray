@@ -11,6 +11,8 @@ from src.router import XDataRouter
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 100
 MAX_FETCH_URLS = 25
+MAX_COLLECT_LIMIT = 500
+FOLLOW_GRAPHS = {"followers", "following"}
 
 
 def clamp_limit(limit: int | None, *, default: int = DEFAULT_LIMIT, maximum: int = MAX_LIMIT) -> int:
@@ -96,6 +98,81 @@ def x_data_status_handler(*, router: XDataRouter | None = None) -> dict[str, Any
     }
 
 
+def x_read_thread_handler(
+    value: str,
+    *,
+    limit: int | None = MAX_LIMIT,
+    router: XDataRouter | None = None,
+) -> dict[str, Any]:
+    router = router or XDataRouter()
+    value = str(value or "").strip()
+    if not value:
+        return _result(ProviderResult.error(provider="mcp", reason="missing_value"))
+    return _result(router.read_thread(value, limit=clamp_limit(limit, default=MAX_LIMIT)))
+
+
+def x_read_replies_handler(
+    value: str,
+    *,
+    limit: int | None = MAX_LIMIT,
+    router: XDataRouter | None = None,
+) -> dict[str, Any]:
+    router = router or XDataRouter()
+    value = str(value or "").strip()
+    if not value:
+        return _result(ProviderResult.error(provider="mcp", reason="missing_value"))
+    return _result(router.read_replies(value, limit=clamp_limit(limit, default=MAX_LIMIT)))
+
+
+def x_read_quotes_handler(
+    value: str,
+    *,
+    limit: int | None = MAX_LIMIT,
+    router: XDataRouter | None = None,
+) -> dict[str, Any]:
+    router = router or XDataRouter()
+    value = str(value or "").strip()
+    if not value:
+        return _result(ProviderResult.error(provider="mcp", reason="missing_value"))
+    return _result(router.read_quotes(value, limit=clamp_limit(limit, default=MAX_LIMIT)))
+
+
+def x_read_follow_graph_handler(
+    user: str,
+    *,
+    graph: str = "followers",
+    limit: int | None = MAX_LIMIT,
+    router: XDataRouter | None = None,
+) -> dict[str, Any]:
+    router = router or XDataRouter()
+    user = str(user or "").strip()
+    graph = str(graph or "").strip().lower()
+    if not user:
+        return _result(ProviderResult.error(provider="mcp", reason="missing_user"))
+    if graph not in FOLLOW_GRAPHS:
+        return _result(
+            ProviderResult.error(
+                provider="mcp",
+                reason="invalid_graph",
+                metadata={"allowed": sorted(FOLLOW_GRAPHS)},
+            )
+        )
+    return _result(router.read_follow_graph(user, graph=graph, limit=clamp_limit(limit, default=MAX_LIMIT)))
+
+
+def x_collect_posts_handler(
+    query: str,
+    *,
+    limit: int | None = MAX_LIMIT,
+    router: XDataRouter | None = None,
+) -> dict[str, Any]:
+    router = router or XDataRouter()
+    query = str(query or "").strip()
+    if not query:
+        return _result(ProviderResult.error(provider="mcp", reason="missing_query"))
+    return _result(router.collect_posts(query, limit=clamp_limit(limit, default=MAX_LIMIT, maximum=MAX_COLLECT_LIMIT)))
+
+
 def create_mcp_server(router: XDataRouter | None = None) -> Any:
     """Create the FastMCP server.
 
@@ -137,6 +214,31 @@ def create_mcp_server(router: XDataRouter | None = None) -> Any:
     def x_read_mentions(limit: int = DEFAULT_LIMIT) -> dict[str, Any]:
         """Read mentions for the authenticated account via the official provider."""
         return x_read_mentions_handler(limit=limit, router=active_router)
+
+    @mcp.tool()
+    def x_read_thread(value: str, limit: int = MAX_LIMIT) -> dict[str, Any]:
+        """Read a thread/conversation by X/Twitter post URL or raw post ID."""
+        return x_read_thread_handler(value, limit=limit, router=active_router)
+
+    @mcp.tool()
+    def x_read_replies(value: str, limit: int = MAX_LIMIT) -> dict[str, Any]:
+        """Read replies for an X/Twitter post URL or raw post ID."""
+        return x_read_replies_handler(value, limit=limit, router=active_router)
+
+    @mcp.tool()
+    def x_read_quotes(value: str, limit: int = MAX_LIMIT) -> dict[str, Any]:
+        """Read quote posts for an X/Twitter post URL or raw post ID."""
+        return x_read_quotes_handler(value, limit=limit, router=active_router)
+
+    @mcp.tool()
+    def x_read_follow_graph(user: str, graph: str = "followers", limit: int = MAX_LIMIT) -> dict[str, Any]:
+        """Read followers or following for one X user."""
+        return x_read_follow_graph_handler(user, graph=graph, limit=limit, router=active_router)
+
+    @mcp.tool()
+    def x_collect_posts(query: str, limit: int = MAX_LIMIT) -> dict[str, Any]:
+        """Collect posts for monitoring or bulk workflows through the router."""
+        return x_collect_posts_handler(query, limit=limit, router=active_router)
 
     @mcp.tool()
     def x_data_status() -> dict[str, Any]:

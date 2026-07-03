@@ -7,6 +7,7 @@ from typing import Any, Callable, Mapping
 
 from src.contracts import ProviderResult
 from src.providers.official_x import OfficialXProvider
+from src.providers.socialdata import SocialDataProvider
 from src.providers.stub import StubProvider
 from src.providers.syndication import SyndicationProvider
 
@@ -25,6 +26,11 @@ DEFAULT_ROUTES: dict[str, list[str]] = {
     "search_posts": ["socialdata", "xpoz", "twikit", "twscrape", "apify", "official_x"],
     "read_owned_timeline": ["official_x"],
     "read_mentions": ["official_x"],
+    "read_thread": ["twikit", "twscrape", "socialdata", "xpoz", "apify", "official_x"],
+    "read_replies": ["socialdata", "xpoz", "apify", "twikit", "twscrape", "official_x"],
+    "read_quotes": ["socialdata", "xpoz", "apify", "twikit", "twscrape", "official_x"],
+    "read_follow_graph": ["socialdata", "xpoz", "twscrape", "twikit", "apify", "official_x"],
+    "collect_posts": ["socialdata", "xpoz", "twscrape", "twikit", "apify"],
 }
 
 
@@ -34,6 +40,11 @@ TASK_METHODS: dict[str, tuple[str, ...]] = {
     "search_posts": ("search_posts", "search_recent"),
     "read_owned_timeline": ("read_owned_timeline",),
     "read_mentions": ("read_mentions",),
+    "read_thread": ("read_thread",),
+    "read_replies": ("read_replies",),
+    "read_quotes": ("read_quotes",),
+    "read_follow_graph": ("read_follow_graph",),
+    "collect_posts": ("collect_posts",),
 }
 
 
@@ -81,6 +92,21 @@ class XDataRouter:
 
     def read_mentions(self, *, limit: int = 20) -> ProviderResult:
         return self.run_task("read_mentions", limit=limit)
+
+    def read_thread(self, value: str, *, limit: int = 100) -> ProviderResult:
+        return self.run_task("read_thread", value=value, limit=limit)
+
+    def read_replies(self, value: str, *, limit: int = 100) -> ProviderResult:
+        return self.run_task("read_replies", value=value, limit=limit)
+
+    def read_quotes(self, value: str, *, limit: int = 100) -> ProviderResult:
+        return self.run_task("read_quotes", value=value, limit=limit)
+
+    def read_follow_graph(self, user: str, *, graph: str = "followers", limit: int = 100) -> ProviderResult:
+        return self.run_task("read_follow_graph", user=user, graph=graph, limit=limit)
+
+    def collect_posts(self, query: str, *, limit: int = 100) -> ProviderResult:
+        return self.run_task("collect_posts", query=query, limit=limit)
 
     def status(self) -> dict[str, Any]:
         provider_status: dict[str, Any] = {}
@@ -176,7 +202,7 @@ def default_providers() -> dict[str, Any]:
     return {
         "syndication": SyndicationProvider(),
         "official_x": OfficialXProvider(),
-        "socialdata": StubProvider("socialdata"),
+        "socialdata": SocialDataProvider(),
         "xpoz": StubProvider("xpoz"),
         "twikit": StubProvider("twikit"),
         "twscrape": StubProvider("twscrape"),
@@ -194,6 +220,16 @@ def _task_kwargs(task: str, kwargs: dict[str, Any]) -> dict[str, Any]:
         return {"query": kwargs["query"], "limit": kwargs.get("limit", 20)}
     if task in {"read_owned_timeline", "read_mentions"}:
         return {"limit": kwargs.get("limit", 20)}
+    if task in {"read_thread", "read_replies", "read_quotes"}:
+        return {"value": kwargs["value"], "limit": kwargs.get("limit", 100)}
+    if task == "read_follow_graph":
+        return {
+            "user": kwargs["user"],
+            "graph": kwargs.get("graph", "followers"),
+            "limit": kwargs.get("limit", 100),
+        }
+    if task == "collect_posts":
+        return {"query": kwargs["query"], "limit": kwargs.get("limit", 100)}
     return kwargs
 
 

@@ -21,6 +21,26 @@ class _Provider:
         self.calls.append(("search_posts", query, limit))
         return self.result
 
+    def read_thread(self, value, *, limit=100):
+        self.calls.append(("read_thread", value, limit))
+        return self.result
+
+    def read_replies(self, value, *, limit=100):
+        self.calls.append(("read_replies", value, limit))
+        return self.result
+
+    def read_quotes(self, value, *, limit=100):
+        self.calls.append(("read_quotes", value, limit))
+        return self.result
+
+    def read_follow_graph(self, user, *, graph="followers", limit=100):
+        self.calls.append(("read_follow_graph", user, graph, limit))
+        return self.result
+
+    def collect_posts(self, query, *, limit=100):
+        self.calls.append(("collect_posts", query, limit))
+        return self.result
+
 
 class _SearchRecentOnlyProvider:
     name = "official_x"
@@ -141,3 +161,41 @@ def test_read_user_posts_passes_user_and_limit():
 
     assert result.status == "ok"
     assert provider.calls == [("read_user_posts", "@alice", 7)]
+
+
+def test_new_matrix_tasks_route_to_provider_methods():
+    provider = _Provider("p", ProviderResult.ok(provider="p", items=[Post(id="1", text="ok")]))
+    router = XDataRouter(
+        providers={"p": provider},
+        routes={
+            "read_thread": ["p"],
+            "read_replies": ["p"],
+            "read_quotes": ["p"],
+            "read_follow_graph": ["p"],
+            "collect_posts": ["p"],
+        },
+    )
+
+    assert router.read_thread("123", limit=11).status == "ok"
+    assert router.read_replies("123", limit=12).status == "ok"
+    assert router.read_quotes("123", limit=13).status == "ok"
+    assert router.read_follow_graph("@alice", graph="following", limit=14).status == "ok"
+    assert router.collect_posts("ai", limit=15).status == "ok"
+
+    assert provider.calls == [
+        ("read_thread", "123", 11),
+        ("read_replies", "123", 12),
+        ("read_quotes", "123", 13),
+        ("read_follow_graph", "@alice", "following", 14),
+        ("collect_posts", "ai", 15),
+    ]
+
+
+def test_new_matrix_tasks_return_stubbed_empty_by_default():
+    router = XDataRouter()
+
+    assert router.read_thread("123").status == "empty"
+    assert router.read_replies("123").status == "empty"
+    assert router.read_quotes("123").status == "empty"
+    assert router.read_follow_graph("@alice").status == "empty"
+    assert router.collect_posts("ai").status == "empty"

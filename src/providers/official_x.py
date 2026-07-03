@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from typing import Any, Callable
 
-from src.contracts import CostEstimate, Metrics, Post, ProviderResult, UserRef
+from src.contracts import CostEstimate, Metrics, Post, ProviderResult, UserProfile, UserRef
 from src.providers.syndication import extract_post_id, normalize_handle
 
 
@@ -68,6 +68,20 @@ def _metrics_from_obj(obj: Any) -> Metrics | None:
     return metrics
 
 
+def _user_public_metrics_from_obj(obj: Any) -> dict[str, int] | None:
+    public_metrics = _value(obj, "public_metrics")
+    if not isinstance(public_metrics, dict):
+        return None
+    metrics = {
+        key: int(value)
+        for key, value in public_metrics.items()
+        if isinstance(value, int) or (isinstance(value, str) and value.isdigit())
+    }
+    if not metrics:
+        return None
+    return metrics
+
+
 def _maybe_int(value: Any) -> int | None:
     if value is None:
         return None
@@ -91,6 +105,40 @@ def _post_from_obj(obj: Any) -> Post | None:
         metrics=_metrics_from_obj(obj),
         source_url=f"https://x.com/i/web/status/{post_id}",
         raw=obj if isinstance(obj, dict) else getattr(obj, "__dict__", {}),
+    )
+
+
+def _user_from_obj(obj: Any) -> UserProfile | None:
+    user_id = str(_value(obj, "id", "") or "").strip()
+    username = str(_value(obj, "username", "") or "").strip() or None
+    if not user_id:
+        return None
+    return UserProfile(
+        id=user_id,
+        username=username,
+        name=_value(obj, "name"),
+        description=_value(obj, "description"),
+        public_metrics=_user_public_metrics_from_obj(obj),
+        source_url=f"https://x.com/{username}" if username else None,
+        raw=obj if isinstance(obj, dict) else getattr(obj, "__dict__", {}),
+    )
+
+
+def _with_extra_context(
+    result: ProviderResult,
+    *,
+    warning: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> ProviderResult:
+    return ProviderResult(
+        status=result.status,
+        provider=result.provider,
+        items=result.items,
+        reason=result.reason,
+        warnings=[*result.warnings, *([warning] if warning else [])],
+        cost=result.cost,
+        raw_ref=result.raw_ref,
+        metadata={**result.metadata, **(metadata or {})},
     )
 
 
@@ -278,6 +326,118 @@ class OfficialXProvider:
             )
         return ProviderResult.empty(provider=self.name)
 
+    def read_thread(self, value: str, *, limit: int = 100) -> ProviderResult:
+        post_id = extract_post_id(value)
+        if not post_id:
+            return ProviderResult.error(provider=self.name, reason="invalid_post_reference")
+        query = f"conversation_id:{post_id}"
+        result = self._search_recent_query(query, limit=limit)
+        if result.status == "ok":
+            return _with_extra_context(
+                result,
+                warning="official_recent_search_only",
+                metadata={"query": query},
+            )
+        return result
+
+    def read_replies(self, value: str, *, limit: int = 100) -> ProviderResult:
+        post_id = extract_post_id(value)
+        if not post_id:
+            return ProviderResult.error(provider=self.name, reason="invalid_post_reference")
+        query = f"conversation_id:{post_id} is:reply"
+        result = self._search_recent_query(query, limit=limit)
+        if result.status == "ok":
+            return _with_extra_context(
+                result,
+                warning="official_recent_search_only",
+                metadata={"query": query},
+            )
+        return result
+
+    def read_quotes(self, value: str, *, limit: int = 100) -> ProviderResult:
+        post_id = extract_post_id(value)
+        if not post_id:
+            return ProviderResult.error(provider=self.name, reason="invalid_post_reference")
+        client, unavailable = self._client()
+        if unavailable:
+            return unavailable
+        assert client is not None
+        try:
+            posts = self._collect_pages(
+                client.posts.get_quoted,
+                {"id": post_id},
+                limit=limit,
+            )
+        except AttributeError:
+            return ProviderResult.unavailable(provider=self.name, reason="sdk_method_missing")
+        except Exception as exc:
+            return ProviderResult.error(provider=self.name, reason="api_error", warnings=[str(exc)])
+        if posts:
+            return ProviderResult.ok(
+                provider=self.name,
+                items=posts,
+                cost=CostEstimate(
+                    amount_usd=len(posts) * POST_READ_COST_USD,
+                    basis="$0.005/post read",
+                ),
+            )
+        return ProviderResult.empty(provider=self.name)
+
+    def read_follow_graph(self, user: str, *, graph: str = "followers", limit: int = 100) -> ProviderResult:
+        if graph not in {"followers", "following"}:
+            return ProviderResult.error(provider=self.name, reason="invalid_graph")
+        client, unavailable = self._client()
+        if unavailable:
+            return unavailable
+        assert client is not None
+
+        handle_or_id = normalize_handle(user)
+        if not handle_or_id:
+            return ProviderResult.error(provider=self.name, reason="missing_user")
+        try:
+            user_id = handle_or_id if handle_or_id.isdigit() else self._resolve_user_id(client, handle_or_id)
+            method = client.users.get_followers if graph == "followers" else client.users.get_following
+            users = self._collect_user_pages(method, {"id": user_id}, limit=limit)
+        except AttributeError:
+            return ProviderResult.unavailable(provider=self.name, reason="sdk_method_missing")
+        except Exception as exc:
+            return ProviderResult.error(provider=self.name, reason="api_error", warnings=[str(exc)])
+        if users:
+            return ProviderResult.ok(
+                provider=self.name,
+                items=users,
+                cost=CostEstimate(
+                    amount_usd=len(users) * USER_READ_COST_USD,
+                    basis="$0.010/user graph read",
+                ),
+                metadata={"graph": graph, "user_id": user_id},
+            )
+        return ProviderResult.empty(provider=self.name)
+
+    def _search_recent_query(self, query: str, *, limit: int) -> ProviderResult:
+        client, unavailable = self._client()
+        if unavailable:
+            return unavailable
+        assert client is not None
+        try:
+            posts = self._collect_pages(
+                client.posts.search_recent,
+                {"query": query},
+                limit=limit,
+            )
+        except Exception as exc:
+            return ProviderResult.error(provider=self.name, reason="api_error", warnings=[str(exc)])
+        if posts:
+            return ProviderResult.ok(
+                provider=self.name,
+                items=posts,
+                cost=CostEstimate(
+                    amount_usd=len(posts) * POST_READ_COST_USD,
+                    basis="$0.005/post read",
+                ),
+            )
+        return ProviderResult.empty(provider=self.name)
+
     def _collect_pages(self, method: Callable[..., Any], base_kwargs: dict[str, Any], *, limit: int) -> list[Post]:
         capped_limit = max(1, min(int(limit), 100))
         tweet_fields = ["created_at", "public_metrics", "text", "author_id"]
@@ -288,6 +448,26 @@ class OfficialXProvider:
                 post = _post_from_obj(item)
                 if post:
                     results.append(post)
+                    if len(results) >= capped_limit:
+                        return results
+        return results
+
+    def _collect_user_pages(
+        self,
+        method: Callable[..., Any],
+        base_kwargs: dict[str, Any],
+        *,
+        limit: int,
+    ) -> list[UserProfile]:
+        capped_limit = max(1, min(int(limit), 100))
+        user_fields = ["created_at", "description", "public_metrics", "username", "name"]
+        kwargs = {**base_kwargs, "max_results": capped_limit, "user_fields": user_fields}
+        results: list[UserProfile] = []
+        for page in method(**kwargs):
+            for item in _data_items(page):
+                user = _user_from_obj(item)
+                if user:
+                    results.append(user)
                     if len(results) >= capped_limit:
                         return results
         return results

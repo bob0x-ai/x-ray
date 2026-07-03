@@ -84,6 +84,23 @@ Implementation direction:
 The provider module is named `official_x`. The x-wing skill remains only a
 reference for local proof, credentials, endpoint behavior, and tests.
 
+Implemented read coverage:
+
+- Exact post URL/ID lookup through `posts.get_by_id`.
+- Recent public posts for one user through `users.get_posts`.
+- Owned timeline and mentions through authenticated user endpoints.
+- Recent search through `posts.search_recent`.
+- Thread and reply fallback through recent search using `conversation_id:<id>`
+  and `conversation_id:<id> is:reply`. This is explicitly a recent-search
+  fallback, not full historical thread reconstruction.
+- Quote reads through `posts.get_quoted`.
+- Followers/following reads through `users.get_followers` and
+  `users.get_following`.
+
+Do not use official X as the default bulk collection provider. Keep it as an
+owned-account route or paid fallback when free/cheap providers fail or when
+official fields are required.
+
 ### XActions + Camoufox
 
 XActions + Camoufox is installed, but it failed during the prior setup attempt.
@@ -196,10 +213,15 @@ Use for:
 
 - Cheap hosted API reads when we want REST-style integration.
 - Search and user timeline reads without maintaining local scraper accounts.
+- Thread, replies, quotes, and follow-graph reads through documented REST
+  endpoints.
 
 Caveat:
 
 - It is paid usage-based, not the same thing as XPOZ's MCP-style product.
+- Several useful endpoints are marked "Limited Access" in the public docs.
+- Requires `Authorization: Bearer <API_KEY>` on every request.
+- Runtime env var for this project: `SOCIALDATA_API_KEY`
 
 ### Twikit
 
@@ -400,8 +422,8 @@ Implemented starting point:
 - Shared contracts: `src/contracts.py`
 - Router: `src/router.py`
 - Stub provider: `src/providers/stub.py`
-- First real providers: `src/providers/syndication.py` and
-  `src/providers/official_x.py`
+- Real providers: `src/providers/syndication.py`,
+  `src/providers/official_x.py`, and `src/providers/socialdata.py`
 - MCP wrapper: `src/server.py`
 
 ## MCP Server Wrapper
@@ -416,6 +438,11 @@ Tools:
 - `x_search_posts(query: str, limit: int = 20)`
 - `x_read_owned_timeline(limit: int = 20)`
 - `x_read_mentions(limit: int = 20)`
+- `x_read_thread(value: str, limit: int = 100)`
+- `x_read_replies(value: str, limit: int = 100)`
+- `x_read_quotes(value: str, limit: int = 100)`
+- `x_read_follow_graph(user: str, graph: str = "followers", limit: int = 100)`
+- `x_collect_posts(query: str, limit: int = 100)`
 - `x_data_status()`
 
 Tool constraints:
@@ -423,6 +450,7 @@ Tool constraints:
 - No tool accepts a provider parameter.
 - `limit` defaults to `20` and clamps to `1..100`.
 - `x_fetch_urls` accepts at most `25` values per call in v1.
+- `x_collect_posts` clamps to `1..500`.
 - Tool handlers return normalized JSON-serializable provider results.
 - `x_data_status` reports only token-safe booleans and provider status.
 - A stdio MCP integration test verifies tool listing, absence of provider
@@ -454,8 +482,28 @@ mcp_servers:
         - x_search_posts
         - x_read_owned_timeline
         - x_read_mentions
+        - x_read_thread
+        - x_read_replies
+        - x_read_quotes
+        - x_read_follow_graph
+        - x_collect_posts
         - x_data_status
 ```
+
+Use-case coverage:
+
+| Matrix axis | MCP tool | Current provider status |
+|---|---|---|
+| `URL` | `x_fetch_urls` | `syndication`, `official_x`, `socialdata` |
+| `Recent` | `x_read_user_posts` | `syndication`, `socialdata`, `official_x` fallback |
+| `Hist` | Deferred | Ignored for now |
+| `Search` | `x_search_posts` | `socialdata`, `official_x` recent fallback |
+| `Thread` | `x_read_thread` | `socialdata`, `official_x` recent-search fallback |
+| `React` replies | `x_read_replies` | `socialdata`, `official_x` recent-search fallback |
+| `React` quotes | `x_read_quotes` | `socialdata`, `official_x` quote endpoint fallback |
+| `Owned` | `x_read_owned_timeline`, `x_read_mentions` | `official_x` |
+| `Graph` | `x_read_follow_graph` | `socialdata`, `official_x` followers/following fallback |
+| `Bulk` | `x_collect_posts` | `socialdata` |
 
 ## Provisional Routing Rules
 
