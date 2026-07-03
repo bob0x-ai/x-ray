@@ -12,6 +12,7 @@ dev = ["ruff>=0.15"]
 
 [project.scripts]
 x-data-mcp = "src.server:main"
+x-data-smoke = "src.smoke:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

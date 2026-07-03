@@ -61,6 +61,8 @@ class _Router:
                 }
             },
             "routes": {"fetch_urls": ["test"]},
+            "effective_routes": {"fetch_urls": ["test"]},
+            "preferred_providers": {"fetch_urls": "test"},
             "tasks": ["fetch_urls"],
         }
 
@@ -140,6 +142,8 @@ def test_status_handler_is_token_safe_shape():
     assert result["status"] == "ok"
     assert result["server"] == "x-data"
     assert result["providers"]["official_x"]["auth_present"] is True
+    assert result["effective_routes"]["fetch_urls"] == ["test"]
+    assert result["preferred_providers"]["fetch_urls"] == "test"
     assert "token" not in str(result).lower()
 
 

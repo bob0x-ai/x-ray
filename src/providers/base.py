@@ -1,8 +1,9 @@
-"""Common provider interface."""
+"""Common provider interface and small provider utilities."""
 
 from __future__ import annotations
 
-from typing import Protocol
+from collections.abc import Callable
+from typing import Any, Protocol
 
 from src.contracts import ProviderResult
 
@@ -49,3 +50,40 @@ class XDataProvider(Protocol):
     def collect_posts(self, query: str, *, limit: int = 100) -> ProviderResult:
         """Collect posts for monitoring/bulk workflows."""
         ...
+
+
+class CooldownMixin:
+    """Lightweight in-process cooldown state for fragile/read-limited providers."""
+
+    def __init__(self, *, time_fn: Callable[[], float], cooldown_seconds: int) -> None:
+        self._time_fn = time_fn
+        self._cooldown_seconds = cooldown_seconds
+        self._cooldown_until: float = 0.0
+        self._cooldown_reason: str | None = None
+
+    def _activate_cooldown(self, reason: str, *, seconds: int | None = None) -> None:
+        duration = max(1, int(seconds if seconds is not None else self._cooldown_seconds))
+        self._cooldown_until = self._time_fn() + duration
+        self._cooldown_reason = reason
+
+    def _cooldown_status(self) -> dict[str, Any]:
+        remaining = max(0, int(self._cooldown_until - self._time_fn()))
+        return {
+            "cooldown_active": remaining > 0,
+            "cooldown_reason": self._cooldown_reason if remaining > 0 else None,
+            "cooldown_seconds_remaining": remaining,
+        }
+
+    def _cooldown_unavailable(self, provider: str) -> ProviderResult | None:
+        status = self._cooldown_status()
+        if not status["cooldown_active"]:
+            return None
+        return ProviderResult.unavailable(
+            provider=provider,
+            reason="cooldown_active",
+            warnings=[str(status["cooldown_reason"])],
+            metadata={
+                "cooldown_reason": status["cooldown_reason"],
+                "cooldown_seconds_remaining": status["cooldown_seconds_remaining"],
+            },
+        )

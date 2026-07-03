@@ -233,11 +233,27 @@ Use for:
 
 - Local free search and profile scraping.
 - Experiments where we can tolerate breakage and use throwaway accounts.
+- A cautious single-account fallback when hosted providers are unavailable and
+  we deliberately accept lower reliability.
 
 Avoid for:
 
 - Running as the real asset account.
 - Any mutating action.
+
+Implementation notes if we add it later:
+
+- Treat Twikit as a fragile fallback, not a default path.
+- Keep the wrapper strictly read-only even though the library supports many
+  mutating operations.
+- Prefer cookie/session reuse over repeated login flows.
+- Use low concurrency, small page sizes, randomized delay/jitter, and explicit
+  backoff after rate-limit-like or suspicious empty responses.
+- If Twikit appears throttled, soft-blocked, or auth-broken, the provider
+  should quickly return `unavailable` and let the router move on.
+- Expose token-safe health/status fields such as `session_present`,
+  `cooldown_active`, `last_rate_limit`, or `last_soft_failure` rather than
+  hiding the failure mode completely.
 
 ### twscrape
 
@@ -473,8 +489,8 @@ Expected Hermes stdio config shape:
 ```yaml
 mcp_servers:
   x-data:
-    command: "python"
-    args: ["-m", "src.server"]
+    command: "/bin/bash"
+    args: ["/home/ubuntu/projects/x_mcp/scripts/x-data-mcp-hermes.sh"]
     tools:
       include:
         - x_fetch_urls
@@ -489,6 +505,15 @@ mcp_servers:
         - x_collect_posts
         - x_data_status
 ```
+
+Recommended integration note:
+
+- Hermes stdio MCP subprocesses do not inherit the full shell environment by
+  default.
+- Use the wrapper script to load only the small allowlist of X-provider env
+  vars from `~/.hermes/.env` before starting `python3 -m src.server`.
+- Full operator-facing setup notes live in
+  [docs/hermes-integration.md](/home/ubuntu/projects/x_mcp/docs/hermes-integration.md).
 
 Use-case coverage:
 
@@ -505,6 +530,21 @@ Use-case coverage:
 | `Graph` | `x_read_follow_graph` | `socialdata`, `official_x` followers/following fallback |
 | `Bulk` | `x_collect_posts` | `socialdata` |
 
+## Operator Note
+
+This server should remain useful in both paid and free configurations.
+
+- Paid path today: `socialdata` for most public reads, `official_x` for
+  owned-account reads and official paid fallback.
+- Free path today: `syndication` for exact URL lookups and shallow recent user
+  reads, with the rest returning `empty` only after all configured providers
+  are exhausted.
+- Future local scrapers such as Twikit should be optional fallbacks, not
+  required for basic server operation.
+- A missing credential should normally make the provider return `unavailable`,
+  not `empty`, so the router can skip it truthfully and continue to the next
+  option.
+
 ## Provisional Routing Rules
 
 These are recommendations for design discussion, not yet implementation.
@@ -518,9 +558,11 @@ These are recommendations for design discussion, not yet implementation.
 
 ### Recent posts by one public user
 
-1. Syndication timeline if ~20 recent posts is enough.
-2. Twikit or twscrape for deeper local scraping.
-3. SocialData/XPOZ for hosted API reads.
+1. SocialData when hosted API reads are available and we want the default path
+   to be reliable, structured, and simple for the agent.
+2. Syndication timeline for exact free shallow reads when ~20 recent posts is
+   enough.
+3. Twikit or twscrape for deeper local scraping.
 4. Apify for larger research pulls.
 
 ### Historical posts by one user

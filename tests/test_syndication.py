@@ -12,6 +12,7 @@ def test_extract_post_id_accepts_ids_and_urls():
     assert extract_post_id("1234567890") == "1234567890"
     assert extract_post_id("https://x.com/alice/status/1234567890") == "1234567890"
     assert extract_post_id("https://twitter.com/alice/statuses/1234567890") == "1234567890"
+    assert extract_post_id("https://x.com/i/web/status/1234567890") == "1234567890"
     assert extract_post_id("not-a-post") is None
 
 
@@ -115,3 +116,32 @@ def test_read_user_posts_returns_unavailable_for_rate_limit():
 
     assert result.status == "unavailable"
     assert result.reason == "rate_limited"
+
+
+def test_rate_limit_activates_syndication_cooldown():
+    now = {"value": 100.0}
+
+    def time_fn():
+        return now["value"]
+
+    calls = {"count": 0}
+
+    def http_get(url, timeout):
+        del url, timeout
+        calls["count"] += 1
+        return HttpResponse(status_code=429, text="rate limited")
+
+    provider = SyndicationProvider(http_get=http_get, cooldown_seconds=30, time_fn=time_fn)
+
+    first = provider.fetch_urls(["1234567890"])
+    second = provider.fetch_urls(["1234567890"])
+    status = provider.status()
+
+    assert first.status == "unavailable"
+    assert first.reason == "rate_limited"
+    assert second.status == "unavailable"
+    assert second.reason == "cooldown_active"
+    assert second.metadata["cooldown_reason"] == "rate_limited"
+    assert status["cooldown_active"] is True
+    assert status["cooldown_reason"] == "rate_limited"
+    assert calls["count"] == 1

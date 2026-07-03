@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -12,11 +13,13 @@ from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
 from src.contracts import CostEstimate, Metrics, Post, ProviderResult, UserProfile, UserRef
+from src.providers.base import CooldownMixin
 from src.providers.syndication import extract_post_id, normalize_handle
 
 PROVIDER_NAME = "socialdata"
 API_BASE_URL = "https://api.socialdata.tools/twitter"
 DEFAULT_TIMEOUT_SECONDS = 20
+DEFAULT_COOLDOWN_SECONDS = 60
 ITEM_COST_USD = 0.0002
 USER_AGENT = "x-mcp/0.1 (+https://github.com/local/x-mcp)"
 
@@ -134,7 +137,7 @@ def user_from_payload(payload: dict[str, Any]) -> UserProfile | None:
     )
 
 
-class SocialDataProvider:
+class SocialDataProvider(CooldownMixin):
     name = PROVIDER_NAME
 
     def __init__(
@@ -142,7 +145,10 @@ class SocialDataProvider:
         *,
         http_get: HttpGet = default_http_get,
         timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
+        cooldown_seconds: int = DEFAULT_COOLDOWN_SECONDS,
+        time_fn: Callable[[], float] = time.time,
     ) -> None:
+        super().__init__(time_fn=time_fn, cooldown_seconds=cooldown_seconds)
         self._http_get = http_get
         self._timeout_seconds = timeout_seconds
 
@@ -154,6 +160,16 @@ class SocialDataProvider:
             "auth_required": True,
             "auth_present": bool(self._api_key()),
             "read_only": True,
+            "supports_tasks": [
+                "fetch_urls",
+                "read_user_posts_recent",
+                "search_posts",
+                "read_thread",
+                "read_replies",
+                "read_quotes",
+                "read_follow_graph",
+                "collect_posts",
+            ],
             "rate_limit": "120 rpm shared across endpoints",
             "limited_access_endpoints": [
                 "search",
@@ -164,9 +180,13 @@ class SocialDataProvider:
                 "followers",
                 "following",
             ],
+            **self._cooldown_status(),
         }
 
     def fetch_urls(self, values: list[str]) -> ProviderResult:
+        blocked = self._cooldown_unavailable(self.name)
+        if blocked:
+            return blocked
         posts: list[Post] = []
         warnings: list[str] = []
 
@@ -216,6 +236,9 @@ class SocialDataProvider:
         return ProviderResult.empty(provider=self.name)
 
     def read_user_posts(self, user: str, *, limit: int = 20) -> ProviderResult:
+        blocked = self._cooldown_unavailable(self.name)
+        if blocked:
+            return blocked
         user_id, failure = self._resolve_user_id(user)
         if failure:
             return failure
@@ -227,6 +250,9 @@ class SocialDataProvider:
         )
 
     def search_posts(self, query: str, *, limit: int = 20) -> ProviderResult:
+        blocked = self._cooldown_unavailable(self.name)
+        if blocked:
+            return blocked
         query = str(query or "").strip()
         if not query:
             return ProviderResult.error(provider=self.name, reason="missing_query")
@@ -238,6 +264,9 @@ class SocialDataProvider:
         )
 
     def read_thread(self, value: str, *, limit: int = 100) -> ProviderResult:
+        blocked = self._cooldown_unavailable(self.name)
+        if blocked:
+            return blocked
         post_id = extract_post_id(value)
         if not post_id:
             return ProviderResult.error(provider=self.name, reason="invalid_post_reference")
@@ -248,6 +277,9 @@ class SocialDataProvider:
         )
 
     def read_replies(self, value: str, *, limit: int = 100) -> ProviderResult:
+        blocked = self._cooldown_unavailable(self.name)
+        if blocked:
+            return blocked
         post_id = extract_post_id(value)
         if not post_id:
             return ProviderResult.error(provider=self.name, reason="invalid_post_reference")
@@ -259,6 +291,9 @@ class SocialDataProvider:
         )
 
     def read_quotes(self, value: str, *, limit: int = 100) -> ProviderResult:
+        blocked = self._cooldown_unavailable(self.name)
+        if blocked:
+            return blocked
         post_id = extract_post_id(value)
         if not post_id:
             return ProviderResult.error(provider=self.name, reason="invalid_post_reference")
@@ -269,6 +304,9 @@ class SocialDataProvider:
         )
 
     def read_follow_graph(self, user: str, *, graph: str = "followers", limit: int = 100) -> ProviderResult:
+        blocked = self._cooldown_unavailable(self.name)
+        if blocked:
+            return blocked
         if graph not in {"followers", "following"}:
             return ProviderResult.error(provider=self.name, reason="invalid_graph")
         user_id, failure = self._resolve_user_id(user)
@@ -284,6 +322,9 @@ class SocialDataProvider:
         )
 
     def collect_posts(self, query: str, *, limit: int = 100) -> ProviderResult:
+        blocked = self._cooldown_unavailable(self.name)
+        if blocked:
+            return blocked
         query = str(query or "").strip()
         if not query:
             return ProviderResult.error(provider=self.name, reason="missing_query")
@@ -512,6 +553,7 @@ class SocialDataProvider:
         if response.status_code == 422:
             return None, ProviderResult.error(provider=self.name, reason="validation_failed", warnings=warnings)
         if response.status_code == 429:
+            self._activate_cooldown("rate_limited")
             return None, ProviderResult.unavailable(provider=self.name, reason="rate_limited", warnings=warnings)
         if response.status_code >= 500:
             return None, ProviderResult.error(provider=self.name, reason="upstream_error", warnings=warnings)

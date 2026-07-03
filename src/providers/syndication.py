@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from html import unescape
@@ -13,15 +14,17 @@ from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from src.contracts import Metrics, Post, ProviderResult, UserRef
+from src.providers.base import CooldownMixin
 
 PROVIDER_NAME = "syndication"
 TWEET_RESULT_URL = "https://cdn.syndication.twimg.com/tweet-result?id={id}&token=a"
 TIMELINE_PROFILE_URL = "https://syndication.twitter.com/srv/timeline-profile/screen-name/{handle}"
 DEFAULT_TIMEOUT_SECONDS = 10
+DEFAULT_COOLDOWN_SECONDS = 60
 USER_AGENT = "x-mcp/0.1 (+https://github.com/local/x-mcp)"
 
 _STATUS_RE = re.compile(
-    r"https?://(?:mobile\.)?(?:x|twitter)\.com/[^/\s]+/status(?:es)?/(?P<id>\d+)",
+    r"https?://(?:mobile\.)?(?:x|twitter)\.com/(?:(?:[^/\s]+/status(?:es)?)|(?:i/web/status))/(?P<id>\d+)",
     re.IGNORECASE,
 )
 _DIGITS_RE = re.compile(r"^\d{5,}$")
@@ -180,7 +183,7 @@ def _walk_for_tweet_dicts(value: Any) -> list[dict[str, Any]]:
     return found
 
 
-class SyndicationProvider:
+class SyndicationProvider(CooldownMixin):
     name = PROVIDER_NAME
 
     def __init__(
@@ -188,7 +191,10 @@ class SyndicationProvider:
         *,
         http_get: HttpGet = default_http_get,
         timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
+        cooldown_seconds: int = DEFAULT_COOLDOWN_SECONDS,
+        time_fn: Callable[[], float] = time.time,
     ) -> None:
+        super().__init__(time_fn=time_fn, cooldown_seconds=cooldown_seconds)
         self._http_get = http_get
         self._timeout_seconds = timeout_seconds
 
@@ -197,9 +203,20 @@ class SyndicationProvider:
             "auth_required": False,
             "configured": True,
             "endpoints": ["tweet_result", "timeline_profile"],
+            "supports_tasks": ["fetch_urls", "read_user_posts_recent"],
+            "limitations": [
+                "no_search",
+                "no_thread_enumeration",
+                "no_quotes_or_graph",
+                "timeline_parse_is_best_effort",
+            ],
+            **self._cooldown_status(),
         }
 
     def fetch_urls(self, values: list[str]) -> ProviderResult:
+        blocked = self._cooldown_unavailable(self.name)
+        if blocked:
+            return blocked
         posts: list[Post] = []
         warnings: list[str] = []
 
@@ -221,6 +238,7 @@ class SyndicationProvider:
                 warnings.append(f"post_unavailable:{post_id}")
                 continue
             if response.status_code == 429:
+                self._activate_cooldown("rate_limited")
                 return ProviderResult.unavailable(
                     provider=self.name,
                     reason="rate_limited",
@@ -260,6 +278,9 @@ class SyndicationProvider:
         return ProviderResult.empty(provider=self.name)
 
     def read_user_posts(self, user: str, *, limit: int = 20) -> ProviderResult:
+        blocked = self._cooldown_unavailable(self.name)
+        if blocked:
+            return blocked
         handle = normalize_handle(user)
         if not handle:
             return ProviderResult.error(provider=self.name, reason="missing_handle")
@@ -280,6 +301,7 @@ class SyndicationProvider:
                 warnings=[f"http_{response.status_code}"],
             )
         if response.status_code == 429:
+            self._activate_cooldown("rate_limited")
             return ProviderResult.unavailable(
                 provider=self.name,
                 reason="rate_limited",

@@ -1,6 +1,6 @@
 from src.contracts import CostEstimate, Post, ProviderResult
 from src.providers.stub import StubProvider
-from src.router import XDataRouter
+from src.router import DEFAULT_ROUTES, XDataRouter
 
 
 class _Provider:
@@ -199,3 +199,28 @@ def test_new_matrix_tasks_return_stubbed_empty_by_default():
     assert router.read_quotes("123").status == "empty"
     assert router.read_follow_graph("@alice").status == "empty"
     assert router.collect_posts("ai").status == "empty"
+
+
+def test_default_recent_user_posts_route_prefers_socialdata():
+    assert DEFAULT_ROUTES["read_user_posts_recent"][0] == "socialdata"
+    assert DEFAULT_ROUTES["read_user_posts_recent"][1] == "syndication"
+
+
+def test_status_reports_effective_routes_and_preferred_providers():
+    router = XDataRouter(
+        providers={
+            "socialdata": _Provider("socialdata", ProviderResult.empty(provider="socialdata")),
+            "stub": StubProvider("stub"),
+        },
+        routes={
+            "search_posts": ["socialdata", "stub"],
+            "collect_posts": ["stub"],
+        },
+    )
+
+    status = router.status()
+
+    assert status["effective_routes"]["search_posts"] == ["socialdata"]
+    assert status["effective_routes"]["collect_posts"] == []
+    assert status["preferred_providers"]["search_posts"] == "socialdata"
+    assert status["preferred_providers"]["collect_posts"] is None

@@ -199,6 +199,22 @@ class OfficialXProvider:
             "sdk_available": self._client_factory is not None or _load_xdk_client_factory() is not None,
             "token_refresh": "deferred",
             "read_only": True,
+            "supports_tasks": [
+                "fetch_urls",
+                "read_user_posts_recent",
+                "search_posts",
+                "read_owned_timeline",
+                "read_mentions",
+                "read_thread",
+                "read_replies",
+                "read_quotes",
+                "read_follow_graph",
+            ],
+            "limitations": [
+                "paid_usage",
+                "thread_and_replies_are_recent_search_fallbacks",
+                "not_default_for_bulk_collection",
+            ],
         }
 
     def fetch_urls(self, values: list[str]) -> ProviderResult:

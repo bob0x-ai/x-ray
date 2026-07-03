@@ -260,6 +260,36 @@ def test_rate_limit_with_non_dict_body_maps_to_rate_limited(monkeypatch):
     assert result.reason == "rate_limited"
 
 
+def test_rate_limit_activates_provider_cooldown(monkeypatch):
+    monkeypatch.setenv("SOCIALDATA_API_KEY", "token")
+    now = {"value": 100.0}
+
+    def time_fn():
+        return now["value"]
+
+    calls = {"count": 0}
+
+    def http_get(url, headers, timeout):
+        del url, headers, timeout
+        calls["count"] += 1
+        return HttpResponse(status_code=429, text=json.dumps({"status": "error", "message": "Rate limited"}))
+
+    provider = SocialDataProvider(http_get=http_get, cooldown_seconds=30, time_fn=time_fn)
+
+    first = provider.search_posts("ai", limit=1)
+    second = provider.search_posts("ai", limit=1)
+    status = provider.status()
+
+    assert first.status == "unavailable"
+    assert first.reason == "rate_limited"
+    assert second.status == "unavailable"
+    assert second.reason == "cooldown_active"
+    assert second.metadata["cooldown_reason"] == "rate_limited"
+    assert status["cooldown_active"] is True
+    assert status["cooldown_reason"] == "rate_limited"
+    assert calls["count"] == 1
+
+
 def test_non_dict_success_body_still_returns_unexpected_payload(monkeypatch):
     monkeypatch.setenv("SOCIALDATA_API_KEY", "token")
 

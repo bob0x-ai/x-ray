@@ -15,10 +15,10 @@ from src.providers.syndication import SyndicationProvider
 DEFAULT_ROUTES: dict[str, list[str]] = {
     "fetch_urls": ["syndication", "official_x", "socialdata", "apify"],
     "read_user_posts_recent": [
+        "socialdata",
         "syndication",
         "twikit",
         "twscrape",
-        "socialdata",
         "xpoz",
         "apify",
         "official_x",
@@ -118,9 +118,22 @@ class XDataRouter:
             status_method = getattr(provider, "status", None)
             if callable(status_method):
                 provider_status[name].update(status_method())
+        effective_routes = {
+            task: [
+                provider_name
+                for provider_name in route
+                if not isinstance(self.providers.get(provider_name) or StubProvider(provider_name), StubProvider)
+            ]
+            for task, route in self.routes.items()
+        }
         return {
             "providers": provider_status,
             "routes": self.routes,
+            "effective_routes": effective_routes,
+            "preferred_providers": {
+                task: (effective_routes[task][0] if effective_routes[task] else None)
+                for task in self.routes
+            },
             "tasks": sorted(self.routes),
         }
 
