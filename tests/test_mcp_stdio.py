@@ -32,6 +32,7 @@ def test_mcp_stdio_lists_tools_and_calls_status():
                 "x_read_follow_graph",
                 "x_collect_posts",
                 "x_data_status",
+                "x_data_healthcheck",
             }
             for tool in tools.values():
                 properties = tool.inputSchema.get("properties", {})
@@ -42,6 +43,14 @@ def test_mcp_stdio_lists_tools_and_calls_status():
             assert status.isError is False
             assert status.structuredContent["status"] == "ok"
             assert status.structuredContent["server"] == "x-data"
-            assert status.structuredContent["providers"]["syndication"]["implemented"] is True
+            assert "summary" in status.structuredContent
+            assert "details" not in status.structuredContent
+
+            health = await session.call_tool("x_data_healthcheck", {"mode": "basic"})
+
+            assert health.isError is False
+            assert health.structuredContent["status"] == "ok"
+            assert health.structuredContent["server"] == "x-data"
+            assert "summary" in health.structuredContent
 
     anyio.run(run)

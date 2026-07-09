@@ -8,6 +8,7 @@ from typing import Any
 
 from src.config import load_config
 from src.contracts import ProviderResult
+from src.diagnostics import provider_health_report, provider_status_report, task_coverage_summary
 from src.providers.official_x import OfficialXProvider
 from src.providers.socialdata import SocialDataProvider
 from src.providers.stub import StubProvider
@@ -96,13 +97,7 @@ class XDataRouter:
     def status(self) -> dict[str, Any]:
         provider_status: dict[str, Any] = {}
         for name, provider in self.providers.items():
-            provider_status[name] = {
-                "implemented": not isinstance(provider, StubProvider),
-                "class": provider.__class__.__name__,
-            }
-            status_method = getattr(provider, "status", None)
-            if callable(status_method):
-                provider_status[name].update(status_method())
+            provider_status[name] = provider_status_report(name, provider)
         effective_routes = {
             task: [
                 provider_name
@@ -119,8 +114,27 @@ class XDataRouter:
                 task: (effective_routes[task][0] if effective_routes[task] else None)
                 for task in self.routes
             },
+            "task_coverage": task_coverage_summary(self.routes, provider_status),
             "config_path": self.config.get("config_path"),
             "tasks": sorted(self.routes),
+        }
+
+    def healthcheck(self, *, mode: str = "live", provider: str | None = None) -> dict[str, Any]:
+        selected = (
+            {provider: self.providers.get(provider) or StubProvider(provider)}
+            if provider
+            else self.providers
+        )
+        reports = {
+            name: provider_health_report(name, active_provider, mode=mode)
+            for name, active_provider in selected.items()
+        }
+        return {
+            "mode": mode,
+            "provider": provider,
+            "providers": reports,
+            "task_coverage": task_coverage_summary(self.routes, reports),
+            "config_path": self.config.get("config_path"),
         }
 
     def run_task(self, task: str, **kwargs: Any) -> ProviderResult:

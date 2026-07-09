@@ -224,3 +224,27 @@ def test_status_reports_effective_routes_and_preferred_providers():
     assert status["effective_routes"]["collect_posts"] == []
     assert status["preferred_providers"]["search_posts"] == "socialdata"
     assert status["preferred_providers"]["collect_posts"] is None
+    assert status["task_coverage"]["search_posts"]["preferred_provider"] == "socialdata"
+
+
+def test_healthcheck_reports_provider_and_task_coverage():
+    provider = _Provider("socialdata", ProviderResult.ok(provider="socialdata", items=[Post(id="1", text="ok")]))
+    provider.status = lambda: {
+        "auth_required": True,
+        "auth_present": True,
+        "supports_tasks": ["search_posts", "read_user_posts_recent"],
+    }
+    router = XDataRouter(
+        providers={"socialdata": provider, "stub": StubProvider("stub")},
+        routes={
+            "search_posts": ["socialdata", "stub"],
+            "read_thread": ["stub"],
+        },
+    )
+
+    health = router.healthcheck(mode="live")
+
+    assert health["providers"]["socialdata"]["probe_ok"] is True
+    assert health["providers"]["socialdata"]["usable"] is True
+    assert health["task_coverage"]["search_posts"]["preferred_provider"] == "socialdata"
+    assert health["task_coverage"]["read_thread"]["available"] is False

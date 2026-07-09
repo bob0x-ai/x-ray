@@ -6,6 +6,7 @@ from typing import Any
 
 from src.config import load_config
 from src.contracts import ProviderResult
+from src.diagnostics import doctor_summary_from_healthcheck, doctor_summary_from_status
 from src.router import XDataRouter
 
 _SERVER_CONFIG = load_config()["server"]
@@ -14,6 +15,8 @@ MAX_LIMIT = int(_SERVER_CONFIG["max_limit"])
 MAX_FETCH_URLS = int(_SERVER_CONFIG["max_fetch_urls"])
 MAX_COLLECT_LIMIT = int(_SERVER_CONFIG["max_collect_limit"])
 FOLLOW_GRAPHS = {"followers", "following"}
+HEALTHCHECK_MODES = {"basic", "live", "deep"}
+DETAIL_LEVELS = {"summary", "detailed"}
 
 
 def clamp_limit(limit: int | None, *, default: int = DEFAULT_LIMIT, maximum: int = MAX_LIMIT) -> int:
@@ -90,13 +93,61 @@ def x_read_mentions_handler(
     return _result(router.read_mentions(limit=clamp_limit(limit)))
 
 
-def x_data_status_handler(*, router: XDataRouter | None = None) -> dict[str, Any]:
+def x_data_status_handler(*, detail: str = "summary", router: XDataRouter | None = None) -> dict[str, Any]:
     router = router or XDataRouter()
-    return {
+    detail = str(detail or "summary").strip().lower()
+    if detail not in DETAIL_LEVELS:
+        return {
+            "status": "error",
+            "server": "x-data",
+            "reason": "invalid_detail_level",
+            "metadata": {"allowed": sorted(DETAIL_LEVELS)},
+        }
+    payload = router.status()
+    response = {
         "status": "ok",
         "server": "x-data",
-        **router.status(),
+        "summary": doctor_summary_from_status(payload),
     }
+    if detail == "detailed":
+        response["details"] = payload
+    return response
+
+
+def x_data_healthcheck_handler(
+    *,
+    mode: str = "live",
+    detail: str = "summary",
+    provider: str | None = None,
+    router: XDataRouter | None = None,
+) -> dict[str, Any]:
+    router = router or XDataRouter()
+    mode = str(mode or "live").strip().lower()
+    detail = str(detail or "summary").strip().lower()
+    provider = str(provider or "").strip() or None
+    if mode not in HEALTHCHECK_MODES:
+        return {
+            "status": "error",
+            "server": "x-data",
+            "reason": "invalid_healthcheck_mode",
+            "metadata": {"allowed": sorted(HEALTHCHECK_MODES)},
+        }
+    if detail not in DETAIL_LEVELS:
+        return {
+            "status": "error",
+            "server": "x-data",
+            "reason": "invalid_detail_level",
+            "metadata": {"allowed": sorted(DETAIL_LEVELS)},
+        }
+    payload = router.healthcheck(mode=mode, provider=provider)
+    response = {
+        "status": "ok",
+        "server": "x-data",
+        "summary": doctor_summary_from_healthcheck(payload),
+    }
+    if detail == "detailed":
+        response["details"] = payload
+    return response
 
 
 def x_read_thread_handler(
@@ -242,9 +293,14 @@ def create_mcp_server(router: XDataRouter | None = None) -> Any:
         return x_collect_posts_handler(query, limit=limit, router=active_router)
 
     @mcp.tool()
-    def x_data_status() -> dict[str, Any]:
+    def x_data_status(detail: str = "summary") -> dict[str, Any]:
         """Return token-safe provider and route status."""
-        return x_data_status_handler(router=active_router)
+        return x_data_status_handler(detail=detail, router=active_router)
+
+    @mcp.tool()
+    def x_data_healthcheck(mode: str = "live", detail: str = "summary") -> dict[str, Any]:
+        """Run active provider diagnostics. Use basic/live/deep to control probe depth."""
+        return x_data_healthcheck_handler(mode=mode, detail=detail, router=active_router)
 
     return mcp
 

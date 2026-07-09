@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import random
 import time
 from collections.abc import Awaitable, Callable
@@ -19,6 +20,7 @@ DEFAULT_COOLDOWN_SECONDS = 300
 DEFAULT_REQUESTS_PER_MINUTE = 6
 DEFAULT_JITTER_SECONDS = 0.75
 DEFAULT_LOCALE = "en-US"
+DEFAULT_EXPIRY_WARNING_DAYS = 7
 
 
 ClientFactory = Callable[[str], Any]
@@ -123,12 +125,16 @@ class TwikitProvider(CooldownMixin, RateLimiterMixin):
 
     def status(self) -> dict[str, Any]:
         cookies_path = Path(self._cookies_file)
+        expiry_status = _load_cookie_expiry_status(cookies_path, warning_days=DEFAULT_EXPIRY_WARNING_DAYS)
         return {
             "auth_required": True,
             "auth_mode": "cookies_file",
             "sdk_available": self._client_factory is not None or _load_twikit_client_factory() is not None,
             "session_file": self._cookies_file,
             "session_file_exists": cookies_path.exists(),
+            "session_meta_file": expiry_status.get("meta_file"),
+            "cookie_expiry": expiry_status.get("cookie_expiry"),
+            "expiry_warnings": expiry_status.get("warnings"),
             "read_only": True,
             "supports_tasks": ["read_user_posts_recent", "search_posts"],
             "limitations": [
@@ -284,3 +290,46 @@ def _cooldown_seconds_from_exception(exc: Exception) -> int | None:
     except (TypeError, ValueError):
         return None
     return max(1, remaining)
+
+
+def _load_cookie_expiry_status(cookies_path: Path, *, warning_days: int) -> dict[str, Any]:
+    meta_path = cookies_path.with_suffix(".meta.json")
+    status = {
+        "meta_file": str(meta_path),
+        "cookie_expiry": None,
+        "warnings": [],
+    }
+    if not meta_path.exists():
+        return status
+    try:
+        payload = json.loads(meta_path.read_text(encoding="utf-8"))
+    except Exception:
+        status["warnings"] = ["cookie_meta_unreadable"]
+        return status
+
+    cookies = payload.get("cookies")
+    if not isinstance(cookies, dict):
+        status["warnings"] = ["cookie_meta_invalid"]
+        return status
+
+    expiry: dict[str, Any] = {}
+    warnings = list(payload.get("warnings") or [])
+    for name in ("auth_token", "ct0"):
+        cookie = cookies.get(name)
+        if not isinstance(cookie, dict):
+            continue
+        expiry[name] = {
+            "present": cookie.get("present"),
+            "expires_at": cookie.get("expires_at"),
+            "days_remaining": cookie.get("days_remaining"),
+        }
+        days = cookie.get("days_remaining")
+        if isinstance(days, (int, float)) and days <= warning_days:
+            warnings.append(f"{name}_expiring_soon")
+
+    derived_at = payload.get("derived_at")
+    if derived_at:
+        expiry["derived_at"] = derived_at
+    status["cookie_expiry"] = expiry or None
+    status["warnings"] = sorted(set(str(item) for item in warnings))
+    return status

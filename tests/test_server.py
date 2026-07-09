@@ -4,6 +4,7 @@ from src.server import (
     clamp_limit,
     create_mcp_server,
     x_collect_posts_handler,
+    x_data_healthcheck_handler,
     x_data_status_handler,
     x_fetch_urls_handler,
     x_read_follow_graph_handler,
@@ -55,15 +56,33 @@ class _Router:
         return {
             "providers": {
                 "official_x": {
+                    "provider": "official_x",
                     "implemented": True,
                     "auth_present": True,
                     "sdk_available": True,
+                    "supports_tasks": ["fetch_urls"],
+                    "usable": True,
                 }
             },
             "routes": {"fetch_urls": ["test"]},
             "effective_routes": {"fetch_urls": ["test"]},
             "preferred_providers": {"fetch_urls": "test"},
+            "task_coverage": {"fetch_urls": {"available": True, "preferred_provider": "test"}},
             "tasks": ["fetch_urls"],
+        }
+
+    def healthcheck(self, *, mode="live", provider=None):
+        return {
+            "mode": mode,
+            "provider": provider,
+            "providers": {
+                "official_x": {
+                    "provider": "official_x",
+                    "probe_ok": True,
+                    "usable": True,
+                }
+            },
+            "task_coverage": {"fetch_urls": {"available": True, "preferred_provider": "official_x"}},
         }
 
 
@@ -141,10 +160,42 @@ def test_status_handler_is_token_safe_shape():
 
     assert result["status"] == "ok"
     assert result["server"] == "x-data"
-    assert result["providers"]["official_x"]["auth_present"] is True
-    assert result["effective_routes"]["fetch_urls"] == ["test"]
-    assert result["preferred_providers"]["fetch_urls"] == "test"
+    assert result["summary"]["task_recommendations"]["fetch_urls"] == "test"
+    assert "details" not in result
     assert "token" not in str(result).lower()
+
+
+def test_status_handler_can_return_detailed_payload():
+    result = x_data_status_handler(detail="detailed", router=_Router())
+
+    assert result["status"] == "ok"
+    assert result["details"]["providers"]["official_x"]["auth_present"] is True
+    assert result["details"]["effective_routes"]["fetch_urls"] == ["test"]
+
+
+def test_healthcheck_handler_returns_router_health():
+    result = x_data_healthcheck_handler(mode="deep", detail="detailed", provider="official_x", router=_Router())
+
+    assert result["status"] == "ok"
+    assert result["summary"]["overall"] == "healthy"
+    assert result["details"]["mode"] == "deep"
+    assert result["details"]["provider"] == "official_x"
+    assert result["details"]["providers"]["official_x"]["probe_ok"] is True
+
+
+def test_healthcheck_handler_rejects_invalid_mode():
+    result = x_data_healthcheck_handler(mode="wild", router=_Router())
+
+    assert result["status"] == "error"
+    assert result["reason"] == "invalid_healthcheck_mode"
+
+
+def test_handlers_reject_invalid_detail_level():
+    status = x_data_status_handler(detail="verbose", router=_Router())
+    health = x_data_healthcheck_handler(detail="verbose", router=_Router())
+
+    assert status["reason"] == "invalid_detail_level"
+    assert health["reason"] == "invalid_detail_level"
 
 
 def test_mcp_server_constructs():
