@@ -10,7 +10,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
-from src.contracts import Metrics, Post, ProviderResult, UserRef
+from src.contracts import CostEstimate, Metrics, Post, ProviderResult, UserRef
 from src.providers.base import CooldownMixin, RateLimiterMixin
 from src.providers.syndication import normalize_handle
 
@@ -147,6 +147,12 @@ class TwikitProvider(CooldownMixin, RateLimiterMixin):
             **self._cooldown_status(),
             **self._rate_limit_status(),
         }
+
+    def estimate_cost(self, task: str, **kwargs: Any) -> CostEstimate | None:
+        del kwargs
+        if task in {"read_user_posts_recent", "search_posts"}:
+            return CostEstimate(amount_usd=0.0, basis="local Twikit session reuse")
+        return None
 
     def read_user_posts(self, user: str, *, limit: int = 20) -> ProviderResult:
         blocked = self._cooldown_unavailable(self.name)

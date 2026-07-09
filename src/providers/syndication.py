@@ -14,7 +14,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
-from src.contracts import Metrics, Post, ProviderResult, UserRef
+from src.contracts import CostEstimate, Metrics, Post, ProviderResult, UserRef
 from src.providers.base import CooldownMixin, RateLimiterMixin
 
 PROVIDER_NAME = "syndication"
@@ -230,6 +230,12 @@ class SyndicationProvider(CooldownMixin, RateLimiterMixin):
             **self._cooldown_status(),
             **self._rate_limit_status(),
         }
+
+    def estimate_cost(self, task: str, **kwargs: Any) -> CostEstimate | None:
+        del kwargs
+        if task in {"fetch_urls", "read_user_posts_recent"}:
+            return CostEstimate(amount_usd=0.0, basis="free syndication endpoint")
+        return None
 
     def fetch_urls(self, values: list[str]) -> ProviderResult:
         blocked = self._cooldown_unavailable(self.name)

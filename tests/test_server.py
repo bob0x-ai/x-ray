@@ -20,35 +20,43 @@ class _Router:
     def __init__(self):
         self.calls = []
 
-    def fetch_urls(self, values):
+    def fetch_urls(self, values, *, max_cost_usd):
+        del max_cost_usd
         self.calls.append(("fetch_urls", values))
         return ProviderResult.ok(provider="test", items=[Post(id="1", text="ok")])
 
-    def read_user_posts_recent(self, user, *, limit=20):
+    def read_user_posts_recent(self, user, *, max_cost_usd, limit=20):
+        del max_cost_usd
         self.calls.append(("read_user_posts_recent", user, limit))
         return ProviderResult.ok(provider="test", items=[Post(id="2", text="user")])
 
-    def search_posts(self, query, *, limit=20):
+    def search_posts(self, query, *, max_cost_usd, limit=20):
+        del max_cost_usd
         self.calls.append(("search_posts", query, limit))
         return ProviderResult.empty(provider="router", reason="all_routes_exhausted")
 
-    def read_thread(self, value, *, limit=100):
+    def read_thread(self, value, *, max_cost_usd, limit=100):
+        del max_cost_usd
         self.calls.append(("read_thread", value, limit))
         return ProviderResult.empty(provider="router", reason="all_routes_exhausted")
 
-    def read_replies(self, value, *, limit=100):
+    def read_replies(self, value, *, max_cost_usd, limit=100):
+        del max_cost_usd
         self.calls.append(("read_replies", value, limit))
         return ProviderResult.empty(provider="router", reason="all_routes_exhausted")
 
-    def read_quotes(self, value, *, limit=100):
+    def read_quotes(self, value, *, max_cost_usd, limit=100):
+        del max_cost_usd
         self.calls.append(("read_quotes", value, limit))
         return ProviderResult.empty(provider="router", reason="all_routes_exhausted")
 
-    def read_follow_graph(self, user, *, graph="followers", limit=100):
+    def read_follow_graph(self, user, *, max_cost_usd, graph="followers", limit=100):
+        del max_cost_usd
         self.calls.append(("read_follow_graph", user, graph, limit))
         return ProviderResult.empty(provider="router", reason="all_routes_exhausted")
 
-    def collect_posts(self, query, *, limit=100):
+    def collect_posts(self, query, *, max_cost_usd, limit=100):
+        del max_cost_usd
         self.calls.append(("collect_posts", query, limit))
         return ProviderResult.empty(provider="router", reason="all_routes_exhausted")
 
@@ -97,7 +105,7 @@ def test_clamp_limit_defaults_and_bounds():
 def test_fetch_urls_handler_limits_batch_size():
     values = [str(i) for i in range(MAX_FETCH_URLS + 1)]
 
-    result = x_fetch_urls_handler(values, router=_Router())
+    result = x_fetch_urls_handler(values, max_cost_usd=0, router=_Router())
 
     assert result["status"] == "needs_approval"
     assert result["reason"] == "too_many_urls"
@@ -106,7 +114,7 @@ def test_fetch_urls_handler_limits_batch_size():
 def test_fetch_urls_handler_calls_router_with_clean_values():
     router = _Router()
 
-    result = x_fetch_urls_handler([" 123 ", "", "https://x.com/a/status/1"], router=router)
+    result = x_fetch_urls_handler([" 123 ", "", "https://x.com/a/status/1"], max_cost_usd=0, router=router)
 
     assert result["status"] == "ok"
     assert router.calls == [("fetch_urls", ["123", "https://x.com/a/status/1"])]
@@ -115,14 +123,14 @@ def test_fetch_urls_handler_calls_router_with_clean_values():
 def test_read_user_posts_handler_clamps_limit():
     router = _Router()
 
-    result = x_read_user_posts_handler("@alice", limit=999, router=router)
+    result = x_read_user_posts_handler("@alice", max_cost_usd=0, limit=999, router=router)
 
     assert result["status"] == "ok"
     assert router.calls == [("read_user_posts_recent", "@alice", 100)]
 
 
 def test_search_posts_handler_returns_router_result():
-    result = x_search_posts_handler("ai", limit=5, router=_Router())
+    result = x_search_posts_handler("ai", max_cost_usd=0, limit=5, router=_Router())
 
     assert result["status"] == "empty"
     assert result["reason"] == "all_routes_exhausted"
@@ -131,11 +139,11 @@ def test_search_posts_handler_returns_router_result():
 def test_new_handlers_validate_and_call_router():
     router = _Router()
 
-    assert x_read_thread_handler("123", limit=999, router=router)["status"] == "empty"
-    assert x_read_replies_handler("123", limit=8, router=router)["status"] == "empty"
-    assert x_read_quotes_handler("123", limit=9, router=router)["status"] == "empty"
-    assert x_read_follow_graph_handler("@alice", graph="following", limit=10, router=router)["status"] == "empty"
-    assert x_collect_posts_handler("ai", limit=9999, router=router)["status"] == "empty"
+    assert x_read_thread_handler("123", max_cost_usd=0, limit=999, router=router)["status"] == "empty"
+    assert x_read_replies_handler("123", max_cost_usd=0, limit=8, router=router)["status"] == "empty"
+    assert x_read_quotes_handler("123", max_cost_usd=0, limit=9, router=router)["status"] == "empty"
+    assert x_read_follow_graph_handler("@alice", max_cost_usd=0, graph="following", limit=10, router=router)["status"] == "empty"
+    assert x_collect_posts_handler("ai", max_cost_usd=0, limit=9999, router=router)["status"] == "empty"
 
     assert router.calls == [
         ("read_thread", "123", 100),
@@ -147,12 +155,17 @@ def test_new_handlers_validate_and_call_router():
 
 
 def test_new_handlers_reject_missing_or_invalid_inputs():
-    assert x_read_thread_handler("", router=_Router())["reason"] == "missing_value"
-    assert x_read_replies_handler("", router=_Router())["reason"] == "missing_value"
-    assert x_read_quotes_handler("", router=_Router())["reason"] == "missing_value"
-    assert x_read_follow_graph_handler("", router=_Router())["reason"] == "missing_user"
-    assert x_read_follow_graph_handler("@alice", graph="likes", router=_Router())["reason"] == "invalid_graph"
-    assert x_collect_posts_handler("", router=_Router())["reason"] == "missing_query"
+    assert x_read_thread_handler("", max_cost_usd=0, router=_Router())["reason"] == "missing_value"
+    assert x_read_replies_handler("", max_cost_usd=0, router=_Router())["reason"] == "missing_value"
+    assert x_read_quotes_handler("", max_cost_usd=0, router=_Router())["reason"] == "missing_value"
+    assert x_read_follow_graph_handler("", max_cost_usd=0, router=_Router())["reason"] == "missing_user"
+    assert x_read_follow_graph_handler("@alice", max_cost_usd=0, graph="likes", router=_Router())["reason"] == "invalid_graph"
+    assert x_collect_posts_handler("", max_cost_usd=0, router=_Router())["reason"] == "missing_query"
+
+
+def test_budget_is_required_for_request_handlers():
+    assert x_search_posts_handler("ai", max_cost_usd=None, router=_Router())["reason"] == "missing_or_invalid_max_cost_usd"
+    assert x_fetch_urls_handler(["123"], max_cost_usd=None, router=_Router())["reason"] == "missing_or_invalid_max_cost_usd"
 
 
 def test_status_handler_is_token_safe_shape():

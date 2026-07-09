@@ -4,10 +4,11 @@ from src.router import DEFAULT_ROUTES, XDataRouter
 
 
 class _Provider:
-    def __init__(self, name, result):
+    def __init__(self, name, result, *, estimate_cost=None):
         self.name = name
         self.result = result
         self.calls = []
+        self._estimate_cost = estimate_cost
 
     def fetch_urls(self, values):
         self.calls.append(("fetch_urls", values))
@@ -41,9 +42,18 @@ class _Provider:
         self.calls.append(("collect_posts", query, limit))
         return self.result
 
+    def estimate_cost(self, task, **kwargs):
+        if self._estimate_cost is not None:
+            return self._estimate_cost(task, **kwargs)
+        return CostEstimate(amount_usd=0.0, basis="test")
+
 
 class _SearchRecentOnlyProvider:
     name = "official_x"
+
+    def estimate_cost(self, task, **kwargs):
+        del task, kwargs
+        return CostEstimate(amount_usd=0.0, basis="test")
 
     def search_recent(self, query, *, limit=20):
         return ProviderResult.ok(
@@ -61,7 +71,7 @@ def test_router_returns_first_non_empty_result():
         routes={"fetch_urls": ["first", "second", "third"]},
     )
 
-    result = router.fetch_urls(["123"])
+    result = router.fetch_urls(["123"], max_cost_usd=0)
 
     assert result.status == "ok"
     assert result.provider == "second"
@@ -82,7 +92,7 @@ def test_router_continues_past_unavailable_error_and_empty():
     }
     router = XDataRouter(providers=providers, routes={"fetch_urls": ["a", "b", "c", "d"]})
 
-    result = router.fetch_urls(["123"])
+    result = router.fetch_urls(["123"], max_cost_usd=0)
 
     assert result.status == "ok"
     assert result.provider == "d"
@@ -109,7 +119,7 @@ def test_router_stops_on_needs_approval():
         routes={"fetch_urls": ["first", "second"]},
     )
 
-    result = router.fetch_urls(["123"])
+    result = router.fetch_urls(["123"], max_cost_usd=0)
 
     assert result.status == "needs_approval"
     assert result.provider == "first"
@@ -123,7 +133,7 @@ def test_router_returns_empty_when_all_routes_exhausted():
         routes={"fetch_urls": ["stub"]},
     )
 
-    result = router.fetch_urls(["123"])
+    result = router.fetch_urls(["123"], max_cost_usd=0)
 
     assert result.status == "empty"
     assert result.provider == "router"
@@ -132,7 +142,7 @@ def test_router_returns_empty_when_all_routes_exhausted():
 
 
 def test_unknown_task_returns_error():
-    result = XDataRouter(providers={}, routes={}).run_task("nope")
+    result = XDataRouter(providers={}, routes={}).run_task("nope", max_cost_usd=0)
 
     assert result.status == "error"
     assert result.reason == "unknown_task"
@@ -144,7 +154,7 @@ def test_router_uses_search_recent_fallback_method_name():
         routes={"search_posts": ["official_x"]},
     )
 
-    result = router.search_posts("ai", limit=5)
+    result = router.search_posts("ai", max_cost_usd=0, limit=5)
 
     assert result.status == "ok"
     assert result.items[0].text == "ai:5"
@@ -157,7 +167,7 @@ def test_read_user_posts_passes_user_and_limit():
         routes={"read_user_posts_recent": ["p"]},
     )
 
-    result = router.read_user_posts_recent("@alice", limit=7)
+    result = router.read_user_posts_recent("@alice", max_cost_usd=0, limit=7)
 
     assert result.status == "ok"
     assert provider.calls == [("read_user_posts", "@alice", 7)]
@@ -176,11 +186,11 @@ def test_new_matrix_tasks_route_to_provider_methods():
         },
     )
 
-    assert router.read_thread("123", limit=11).status == "ok"
-    assert router.read_replies("123", limit=12).status == "ok"
-    assert router.read_quotes("123", limit=13).status == "ok"
-    assert router.read_follow_graph("@alice", graph="following", limit=14).status == "ok"
-    assert router.collect_posts("ai", limit=15).status == "ok"
+    assert router.read_thread("123", max_cost_usd=0, limit=11).status == "ok"
+    assert router.read_replies("123", max_cost_usd=0, limit=12).status == "ok"
+    assert router.read_quotes("123", max_cost_usd=0, limit=13).status == "ok"
+    assert router.read_follow_graph("@alice", max_cost_usd=0, graph="following", limit=14).status == "ok"
+    assert router.collect_posts("ai", max_cost_usd=0, limit=15).status == "ok"
 
     assert provider.calls == [
         ("read_thread", "123", 11),
@@ -194,11 +204,11 @@ def test_new_matrix_tasks_route_to_provider_methods():
 def test_new_matrix_tasks_return_stubbed_empty_by_default():
     router = XDataRouter()
 
-    assert router.read_thread("123").status == "empty"
-    assert router.read_replies("123").status == "empty"
-    assert router.read_quotes("123").status == "empty"
-    assert router.read_follow_graph("@alice").status == "empty"
-    assert router.collect_posts("ai").status == "empty"
+    assert router.read_thread("123", max_cost_usd=0).status == "needs_approval"
+    assert router.read_replies("123", max_cost_usd=0).status == "needs_approval"
+    assert router.read_quotes("123", max_cost_usd=0).status == "needs_approval"
+    assert router.read_follow_graph("@alice", max_cost_usd=0).status == "needs_approval"
+    assert router.collect_posts("ai", max_cost_usd=0).status == "needs_approval"
 
 
 def test_default_recent_user_posts_route_prefers_socialdata():
@@ -248,3 +258,45 @@ def test_healthcheck_reports_provider_and_task_coverage():
     assert health["providers"]["socialdata"]["usable"] is True
     assert health["task_coverage"]["search_posts"]["preferred_provider"] == "socialdata"
     assert health["task_coverage"]["read_thread"]["available"] is False
+
+
+def test_router_skips_budget_blocked_provider_and_continues():
+    paid = _Provider(
+        "paid",
+        ProviderResult.ok(provider="paid", items=[Post(id="p1", text="paid")]),
+        estimate_cost=lambda task, **kwargs: CostEstimate(amount_usd=1.0, basis=task),
+    )
+    free = _Provider("free", ProviderResult.ok(provider="free", items=[Post(id="f1", text="free")]))
+    router = XDataRouter(providers={"paid": paid, "free": free}, routes={"search_posts": ["paid", "free"]})
+
+    result = router.search_posts("ai", max_cost_usd=0, limit=5)
+
+    assert result.status == "ok"
+    assert result.provider == "free"
+    assert result.metadata["providers_attempted"][0]["reason"] == "budget_exceeded"
+    assert result.metadata["providers_attempted"][0]["estimated_cost_usd"] == 1.0
+
+
+def test_router_returns_needs_approval_when_all_paths_exceed_budget():
+    paid = _Provider(
+        "paid",
+        ProviderResult.ok(provider="paid", items=[Post(id="p1", text="paid")]),
+        estimate_cost=lambda task, **kwargs: CostEstimate(amount_usd=2.0, basis=task),
+    )
+    router = XDataRouter(providers={"paid": paid}, routes={"search_posts": ["paid"]})
+
+    result = router.search_posts("ai", max_cost_usd=0.5, limit=5)
+
+    assert result.status == "needs_approval"
+    assert result.provider == "router"
+    assert result.reason == "budget_exceeded"
+    assert result.metadata["max_cost_usd"] == 0.5
+
+
+def test_router_rejects_missing_budget():
+    router = XDataRouter(providers={}, routes={"search_posts": []})
+
+    result = router.run_task("search_posts", query="ai")
+
+    assert result.status == "error"
+    assert result.reason == "missing_or_invalid_max_cost_usd"

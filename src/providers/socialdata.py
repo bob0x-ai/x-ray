@@ -140,6 +140,27 @@ def user_from_payload(payload: dict[str, Any]) -> UserProfile | None:
     )
 
 
+def _socialdata_estimate_units(task: str, **kwargs: Any) -> int | None:
+    if task == "fetch_urls":
+        values = kwargs.get("values") or []
+        return max(0, len(values))
+    if task in {
+        "read_user_posts_recent",
+        "search_posts",
+        "read_thread",
+        "read_replies",
+        "read_quotes",
+        "read_follow_graph",
+        "collect_posts",
+    }:
+        limit = kwargs.get("limit", 20)
+        try:
+            return max(1, int(limit))
+        except (TypeError, ValueError):
+            return 1
+    return None
+
+
 class SocialDataProvider(CooldownMixin, RateLimiterMixin):
     name = PROVIDER_NAME
 
@@ -200,6 +221,15 @@ class SocialDataProvider(CooldownMixin, RateLimiterMixin):
             **self._cooldown_status(),
             **self._rate_limit_status(),
         }
+
+    def estimate_cost(self, task: str, **kwargs: Any) -> CostEstimate | None:
+        units = _socialdata_estimate_units(task, **kwargs)
+        if units is None:
+            return None
+        return CostEstimate(
+            amount_usd=round(units * ITEM_COST_USD, 6),
+            basis="$0.20 / 1,000 tweets or user profiles (upper bound by requested limit)",
+        )
 
     def fetch_urls(self, values: list[str]) -> ProviderResult:
         blocked = self._cooldown_unavailable(self.name)

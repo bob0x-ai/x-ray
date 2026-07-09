@@ -51,6 +51,10 @@ class StubProvider:
         del query, limit
         return self._not_implemented("collect_posts")
 
+    def estimate_cost(self, task: str, **kwargs) -> None:
+        del task, kwargs
+        return None
+
     def _not_implemented(self, task: str) -> ProviderResult:
         return ProviderResult.unavailable(
             provider=self.name,

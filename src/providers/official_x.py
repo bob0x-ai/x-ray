@@ -153,6 +153,29 @@ def _with_extra_context(
     )
 
 
+def _official_x_estimate(task: str, **kwargs: Any) -> tuple[float | None, str | None]:
+    if task == "fetch_urls":
+        values = kwargs.get("values") or []
+        return len(values) * POST_READ_COST_USD, "$0.005/post read (upper bound by requested URLs)"
+    if task in {"read_user_posts_recent", "search_posts", "read_thread", "read_replies", "read_quotes"}:
+        limit = _estimate_limit(kwargs.get("limit", 20))
+        return limit * POST_READ_COST_USD, "$0.005/post read (upper bound by requested limit)"
+    if task in {"read_owned_timeline", "read_mentions"}:
+        limit = _estimate_limit(kwargs.get("limit", 20))
+        return limit * OWNED_READ_COST_USD, "$0.001/owned-account post read (upper bound by requested limit)"
+    if task == "read_follow_graph":
+        limit = _estimate_limit(kwargs.get("limit", 100))
+        return limit * USER_READ_COST_USD, "$0.010/user read (upper bound by requested limit)"
+    return None, None
+
+
+def _estimate_limit(value: Any) -> int:
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return 1
+
+
 class OfficialXProvider:
     """Read-only official X provider.
 
@@ -216,6 +239,12 @@ class OfficialXProvider:
                 "not_default_for_bulk_collection",
             ],
         }
+
+    def estimate_cost(self, task: str, **kwargs: Any) -> CostEstimate | None:
+        units, basis = _official_x_estimate(task, **kwargs)
+        if units is None or basis is None:
+            return None
+        return CostEstimate(amount_usd=round(units, 6), basis=basis)
 
     def fetch_urls(self, values: list[str]) -> ProviderResult:
         client, unavailable = self._client()

@@ -7,7 +7,7 @@ import random
 import time
 from typing import Any, Protocol
 
-from src.contracts import ProviderResult
+from src.contracts import CostEstimate, ProviderResult
 
 
 class XDataProvider(Protocol):
@@ -51,6 +51,10 @@ class XDataProvider(Protocol):
 
     def collect_posts(self, query: str, *, limit: int = 100) -> ProviderResult:
         """Collect posts for monitoring/bulk workflows."""
+        ...
+
+    def estimate_cost(self, task: str, **kwargs: Any) -> CostEstimate | None:
+        """Return a conservative preflight cost estimate for one task."""
         ...
 
 

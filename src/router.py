@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from src.config import load_config
-from src.contracts import ProviderResult
+from src.contracts import CostEstimate, ProviderResult
 from src.diagnostics import provider_health_report, provider_status_report, task_coverage_summary
 from src.providers.official_x import OfficialXProvider
 from src.providers.socialdata import SocialDataProvider
@@ -42,6 +42,7 @@ class ProviderAttempt:
     status: str
     reason: str | None
     items: int
+    estimated_cost_usd: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -49,6 +50,7 @@ class ProviderAttempt:
             "status": self.status,
             "reason": self.reason,
             "items": self.items,
+            "estimated_cost_usd": self.estimated_cost_usd,
         }
 
 
@@ -64,35 +66,35 @@ class XDataRouter:
         self.routes = dict(routes or self.config["routes"] or DEFAULT_ROUTES)
         self.providers = dict(providers or default_providers(self.config))
 
-    def fetch_urls(self, values: list[str]) -> ProviderResult:
-        return self.run_task("fetch_urls", values=values)
+    def fetch_urls(self, values: list[str], *, max_cost_usd: float) -> ProviderResult:
+        return self.run_task("fetch_urls", values=values, max_cost_usd=max_cost_usd)
 
-    def read_user_posts_recent(self, user: str, *, limit: int = 20) -> ProviderResult:
-        return self.run_task("read_user_posts_recent", user=user, limit=limit)
+    def read_user_posts_recent(self, user: str, *, max_cost_usd: float, limit: int = 20) -> ProviderResult:
+        return self.run_task("read_user_posts_recent", user=user, limit=limit, max_cost_usd=max_cost_usd)
 
-    def search_posts(self, query: str, *, limit: int = 20) -> ProviderResult:
-        return self.run_task("search_posts", query=query, limit=limit)
+    def search_posts(self, query: str, *, max_cost_usd: float, limit: int = 20) -> ProviderResult:
+        return self.run_task("search_posts", query=query, limit=limit, max_cost_usd=max_cost_usd)
 
-    def read_owned_timeline(self, *, limit: int = 20) -> ProviderResult:
-        return self.run_task("read_owned_timeline", limit=limit)
+    def read_owned_timeline(self, *, max_cost_usd: float, limit: int = 20) -> ProviderResult:
+        return self.run_task("read_owned_timeline", limit=limit, max_cost_usd=max_cost_usd)
 
-    def read_mentions(self, *, limit: int = 20) -> ProviderResult:
-        return self.run_task("read_mentions", limit=limit)
+    def read_mentions(self, *, max_cost_usd: float, limit: int = 20) -> ProviderResult:
+        return self.run_task("read_mentions", limit=limit, max_cost_usd=max_cost_usd)
 
-    def read_thread(self, value: str, *, limit: int = 100) -> ProviderResult:
-        return self.run_task("read_thread", value=value, limit=limit)
+    def read_thread(self, value: str, *, max_cost_usd: float, limit: int = 100) -> ProviderResult:
+        return self.run_task("read_thread", value=value, limit=limit, max_cost_usd=max_cost_usd)
 
-    def read_replies(self, value: str, *, limit: int = 100) -> ProviderResult:
-        return self.run_task("read_replies", value=value, limit=limit)
+    def read_replies(self, value: str, *, max_cost_usd: float, limit: int = 100) -> ProviderResult:
+        return self.run_task("read_replies", value=value, limit=limit, max_cost_usd=max_cost_usd)
 
-    def read_quotes(self, value: str, *, limit: int = 100) -> ProviderResult:
-        return self.run_task("read_quotes", value=value, limit=limit)
+    def read_quotes(self, value: str, *, max_cost_usd: float, limit: int = 100) -> ProviderResult:
+        return self.run_task("read_quotes", value=value, limit=limit, max_cost_usd=max_cost_usd)
 
-    def read_follow_graph(self, user: str, *, graph: str = "followers", limit: int = 100) -> ProviderResult:
-        return self.run_task("read_follow_graph", user=user, graph=graph, limit=limit)
+    def read_follow_graph(self, user: str, *, max_cost_usd: float, graph: str = "followers", limit: int = 100) -> ProviderResult:
+        return self.run_task("read_follow_graph", user=user, graph=graph, limit=limit, max_cost_usd=max_cost_usd)
 
-    def collect_posts(self, query: str, *, limit: int = 100) -> ProviderResult:
-        return self.run_task("collect_posts", query=query, limit=limit)
+    def collect_posts(self, query: str, *, max_cost_usd: float, limit: int = 100) -> ProviderResult:
+        return self.run_task("collect_posts", query=query, limit=limit, max_cost_usd=max_cost_usd)
 
     def status(self) -> dict[str, Any]:
         provider_status: dict[str, Any] = {}
@@ -138,6 +140,13 @@ class XDataRouter:
         }
 
     def run_task(self, task: str, **kwargs: Any) -> ProviderResult:
+        max_cost_usd = _coerce_budget(kwargs.get("max_cost_usd"))
+        if max_cost_usd is None:
+            return ProviderResult.error(
+                provider="router",
+                reason="missing_or_invalid_max_cost_usd",
+                metadata={"task": task},
+            )
         if task not in self.routes:
             return ProviderResult.error(
                 provider="router",
@@ -153,22 +162,42 @@ class XDataRouter:
 
         attempts: list[ProviderAttempt] = []
         route = self.routes[task]
+        budget_blocked: list[ProviderAttempt] = []
         for provider_name in route:
             provider = self.providers.get(provider_name) or StubProvider(provider_name)
-            result = self._call_provider(task, provider, kwargs)
+            estimate = self._estimate_provider_cost(task, provider, kwargs)
+            if estimate is not None and estimate.amount_usd > max_cost_usd:
+                result = ProviderResult.needs_approval(
+                    provider=getattr(provider, "name", provider.__class__.__name__),
+                    reason="budget_exceeded",
+                    cost=estimate,
+                    metadata={"task": task, "max_cost_usd": max_cost_usd},
+                )
+            elif estimate is None and not isinstance(provider, StubProvider):
+                result = ProviderResult.needs_approval(
+                    provider=getattr(provider, "name", provider.__class__.__name__),
+                    reason="cost_unknown",
+                    metadata={"task": task, "max_cost_usd": max_cost_usd},
+                )
+            else:
+                result = self._call_provider(task, provider, kwargs)
             attempts.append(
                 ProviderAttempt(
                     provider=result.provider,
                     status=result.status,
                     reason=result.reason,
                     items=len(result.items),
+                    estimated_cost_usd=estimate.amount_usd if estimate else None,
                 )
             )
 
             if result.status == "ok" and result.items:
-                return _with_attempts(result, attempts)
+                return _with_attempts(result, attempts, max_cost_usd=max_cost_usd, estimated_cost=estimate)
+            if result.status == "needs_approval" and result.reason in {"budget_exceeded", "cost_unknown"}:
+                budget_blocked.append(attempts[-1])
+                continue
             if result.status in TERMINAL_STATUSES:
-                return _with_attempts(result, attempts)
+                return _with_attempts(result, attempts, max_cost_usd=max_cost_usd, estimated_cost=estimate)
             if result.status in CONTINUE_STATUSES:
                 continue
 
@@ -179,14 +208,35 @@ class XDataRouter:
                     metadata={"task": task},
                 ),
                 attempts,
+                max_cost_usd=max_cost_usd,
             )
 
+        if budget_blocked:
+            blocking = min(
+                (attempt for attempt in budget_blocked if attempt.estimated_cost_usd is not None),
+                key=lambda attempt: attempt.estimated_cost_usd,
+                default=None,
+            )
+            return ProviderResult.needs_approval(
+                provider="router",
+                reason="budget_exceeded",
+                cost=CostEstimate(
+                    amount_usd=blocking.estimated_cost_usd if blocking and blocking.estimated_cost_usd is not None else 0.0,
+                    basis="lowest estimated paid/provider cost that exceeded the request budget",
+                ) if blocking else None,
+                metadata={
+                    "task": task,
+                    "max_cost_usd": max_cost_usd,
+                    "providers_attempted": [attempt.to_dict() for attempt in attempts],
+                },
+            )
         return ProviderResult.empty(
             provider="router",
             reason="all_routes_exhausted",
             metadata={
                 "task": task,
                 "providers_attempted": [attempt.to_dict() for attempt in attempts],
+                "max_cost_usd": max_cost_usd,
             },
         )
 
@@ -209,6 +259,15 @@ class XDataRouter:
             reason="not_implemented",
             metadata={"task": task},
         )
+
+    def _estimate_provider_cost(self, task: str, provider: Any, kwargs: dict[str, Any]) -> CostEstimate | None:
+        estimate_method = getattr(provider, "estimate_cost", None)
+        if not callable(estimate_method):
+            return None
+        try:
+            return estimate_method(task, **_task_kwargs(task, kwargs))
+        except Exception:
+            return None
 
 
 def default_providers(config: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -314,11 +373,21 @@ def _task_kwargs(task: str, kwargs: dict[str, Any]) -> dict[str, Any]:
     return kwargs
 
 
-def _with_attempts(result: ProviderResult, attempts: list[ProviderAttempt]) -> ProviderResult:
+def _with_attempts(
+    result: ProviderResult,
+    attempts: list[ProviderAttempt],
+    *,
+    max_cost_usd: float | None = None,
+    estimated_cost: CostEstimate | None = None,
+) -> ProviderResult:
     metadata = {
         **result.metadata,
         "providers_attempted": [attempt.to_dict() for attempt in attempts],
     }
+    if max_cost_usd is not None:
+        metadata["max_cost_usd"] = max_cost_usd
+    if estimated_cost is not None:
+        metadata["estimated_cost_usd"] = estimated_cost.amount_usd
     return ProviderResult(
         status=result.status,
         provider=result.provider,
@@ -329,3 +398,13 @@ def _with_attempts(result: ProviderResult, attempts: list[ProviderAttempt]) -> P
         raw_ref=result.raw_ref,
         metadata=metadata,
     )
+
+
+def _coerce_budget(value: Any) -> float | None:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed < 0:
+        return None
+    return parsed

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any, Literal
 
+from pydantic import Field
 from src.config import load_config
 from src.contracts import ProviderResult
 from src.diagnostics import doctor_summary_from_healthcheck, doctor_summary_from_status
@@ -17,6 +18,13 @@ MAX_COLLECT_LIMIT = int(_SERVER_CONFIG["max_collect_limit"])
 FOLLOW_GRAPHS = {"followers", "following"}
 HEALTHCHECK_MODES = {"basic", "live", "deep"}
 DETAIL_LEVELS = {"summary", "detailed"}
+DetailLevel = Literal["summary", "detailed"]
+HealthcheckMode = Literal["basic", "live", "deep"]
+FollowGraph = Literal["followers", "following"]
+MaxCostUsd = Annotated[
+    float,
+    Field(description="Hard spend cap in USD for this request. Use 0 for free-only routing.", ge=0),
+]
 
 
 def clamp_limit(limit: int | None, *, default: int = DEFAULT_LIMIT, maximum: int = MAX_LIMIT) -> int:
@@ -33,8 +41,26 @@ def _result(result: ProviderResult) -> dict[str, Any]:
     return result.to_dict()
 
 
-def x_fetch_urls_handler(values: list[str], *, router: XDataRouter | None = None) -> dict[str, Any]:
+def validate_max_cost_usd(value: float | int | str | None) -> float | None:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed < 0:
+        return None
+    return parsed
+
+
+def x_fetch_urls_handler(
+    values: list[str],
+    *,
+    max_cost_usd: float | int | str | None,
+    router: XDataRouter | None = None,
+) -> dict[str, Any]:
     router = router or XDataRouter()
+    budget = validate_max_cost_usd(max_cost_usd)
+    if budget is None:
+        return _result(ProviderResult.error(provider="mcp", reason="missing_or_invalid_max_cost_usd"))
     clean_values = [str(value).strip() for value in values or [] if str(value).strip()]
     if not clean_values:
         return _result(ProviderResult.error(provider="mcp", reason="missing_values"))
@@ -46,51 +72,67 @@ def x_fetch_urls_handler(values: list[str], *, router: XDataRouter | None = None
                 metadata={"max": MAX_FETCH_URLS, "requested": len(clean_values)},
             )
         )
-    return _result(router.fetch_urls(clean_values))
+    return _result(router.fetch_urls(clean_values, max_cost_usd=budget))
 
 
 def x_read_user_posts_handler(
     user: str,
     *,
+    max_cost_usd: float | int | str | None,
     limit: int | None = DEFAULT_LIMIT,
     router: XDataRouter | None = None,
 ) -> dict[str, Any]:
     router = router or XDataRouter()
+    budget = validate_max_cost_usd(max_cost_usd)
+    if budget is None:
+        return _result(ProviderResult.error(provider="mcp", reason="missing_or_invalid_max_cost_usd"))
     user = str(user or "").strip()
     if not user:
         return _result(ProviderResult.error(provider="mcp", reason="missing_user"))
-    return _result(router.read_user_posts_recent(user, limit=clamp_limit(limit)))
+    return _result(router.read_user_posts_recent(user, max_cost_usd=budget, limit=clamp_limit(limit)))
 
 
 def x_search_posts_handler(
     query: str,
     *,
+    max_cost_usd: float | int | str | None,
     limit: int | None = DEFAULT_LIMIT,
     router: XDataRouter | None = None,
 ) -> dict[str, Any]:
     router = router or XDataRouter()
+    budget = validate_max_cost_usd(max_cost_usd)
+    if budget is None:
+        return _result(ProviderResult.error(provider="mcp", reason="missing_or_invalid_max_cost_usd"))
     query = str(query or "").strip()
     if not query:
         return _result(ProviderResult.error(provider="mcp", reason="missing_query"))
-    return _result(router.search_posts(query, limit=clamp_limit(limit)))
+    return _result(router.search_posts(query, max_cost_usd=budget, limit=clamp_limit(limit)))
 
 
 def x_read_owned_timeline_handler(
     *,
+    max_cost_usd: float | int | str | None,
     limit: int | None = DEFAULT_LIMIT,
     router: XDataRouter | None = None,
 ) -> dict[str, Any]:
     router = router or XDataRouter()
-    return _result(router.read_owned_timeline(limit=clamp_limit(limit)))
+    budget = validate_max_cost_usd(max_cost_usd)
+    if budget is None:
+        return _result(ProviderResult.error(provider="mcp", reason="missing_or_invalid_max_cost_usd"))
+    return _result(router.read_owned_timeline(max_cost_usd=budget, limit=clamp_limit(limit)))
 
 
 def x_read_mentions_handler(
     *,
+    max_cost_usd: float | int | str | None,
     limit: int | None = DEFAULT_LIMIT,
     router: XDataRouter | None = None,
 ) -> dict[str, Any]:
     router = router or XDataRouter()
-    return _result(router.read_mentions(limit=clamp_limit(limit)))
+    budget = validate_max_cost_usd(max_cost_usd)
+    if budget is None:
+        return _result(ProviderResult.error(provider="mcp", reason="missing_or_invalid_max_cost_usd"))
+    return _result(router.read_mentions(max_cost_usd=budget, limit=clamp_limit(limit)))
 
 
 def x_data_status_handler(*, detail: str = "summary", router: XDataRouter | None = None) -> dict[str, Any]:
@@ -153,50 +195,66 @@ def x_data_healthcheck_handler(
 def x_read_thread_handler(
     value: str,
     *,
+    max_cost_usd: float | int | str | None,
     limit: int | None = MAX_LIMIT,
     router: XDataRouter | None = None,
 ) -> dict[str, Any]:
     router = router or XDataRouter()
+    budget = validate_max_cost_usd(max_cost_usd)
+    if budget is None:
+        return _result(ProviderResult.error(provider="mcp", reason="missing_or_invalid_max_cost_usd"))
     value = str(value or "").strip()
     if not value:
         return _result(ProviderResult.error(provider="mcp", reason="missing_value"))
-    return _result(router.read_thread(value, limit=clamp_limit(limit, default=MAX_LIMIT)))
+    return _result(router.read_thread(value, max_cost_usd=budget, limit=clamp_limit(limit, default=MAX_LIMIT)))
 
 
 def x_read_replies_handler(
     value: str,
     *,
+    max_cost_usd: float | int | str | None,
     limit: int | None = MAX_LIMIT,
     router: XDataRouter | None = None,
 ) -> dict[str, Any]:
     router = router or XDataRouter()
+    budget = validate_max_cost_usd(max_cost_usd)
+    if budget is None:
+        return _result(ProviderResult.error(provider="mcp", reason="missing_or_invalid_max_cost_usd"))
     value = str(value or "").strip()
     if not value:
         return _result(ProviderResult.error(provider="mcp", reason="missing_value"))
-    return _result(router.read_replies(value, limit=clamp_limit(limit, default=MAX_LIMIT)))
+    return _result(router.read_replies(value, max_cost_usd=budget, limit=clamp_limit(limit, default=MAX_LIMIT)))
 
 
 def x_read_quotes_handler(
     value: str,
     *,
+    max_cost_usd: float | int | str | None,
     limit: int | None = MAX_LIMIT,
     router: XDataRouter | None = None,
 ) -> dict[str, Any]:
     router = router or XDataRouter()
+    budget = validate_max_cost_usd(max_cost_usd)
+    if budget is None:
+        return _result(ProviderResult.error(provider="mcp", reason="missing_or_invalid_max_cost_usd"))
     value = str(value or "").strip()
     if not value:
         return _result(ProviderResult.error(provider="mcp", reason="missing_value"))
-    return _result(router.read_quotes(value, limit=clamp_limit(limit, default=MAX_LIMIT)))
+    return _result(router.read_quotes(value, max_cost_usd=budget, limit=clamp_limit(limit, default=MAX_LIMIT)))
 
 
 def x_read_follow_graph_handler(
     user: str,
     *,
+    max_cost_usd: float | int | str | None,
     graph: str = "followers",
     limit: int | None = MAX_LIMIT,
     router: XDataRouter | None = None,
 ) -> dict[str, Any]:
     router = router or XDataRouter()
+    budget = validate_max_cost_usd(max_cost_usd)
+    if budget is None:
+        return _result(ProviderResult.error(provider="mcp", reason="missing_or_invalid_max_cost_usd"))
     user = str(user or "").strip()
     graph = str(graph or "").strip().lower()
     if not user:
@@ -209,20 +267,30 @@ def x_read_follow_graph_handler(
                 metadata={"allowed": sorted(FOLLOW_GRAPHS)},
             )
         )
-    return _result(router.read_follow_graph(user, graph=graph, limit=clamp_limit(limit, default=MAX_LIMIT)))
+    return _result(router.read_follow_graph(user, max_cost_usd=budget, graph=graph, limit=clamp_limit(limit, default=MAX_LIMIT)))
 
 
 def x_collect_posts_handler(
     query: str,
     *,
+    max_cost_usd: float | int | str | None,
     limit: int | None = MAX_LIMIT,
     router: XDataRouter | None = None,
 ) -> dict[str, Any]:
     router = router or XDataRouter()
+    budget = validate_max_cost_usd(max_cost_usd)
+    if budget is None:
+        return _result(ProviderResult.error(provider="mcp", reason="missing_or_invalid_max_cost_usd"))
     query = str(query or "").strip()
     if not query:
         return _result(ProviderResult.error(provider="mcp", reason="missing_query"))
-    return _result(router.collect_posts(query, limit=clamp_limit(limit, default=MAX_LIMIT, maximum=MAX_COLLECT_LIMIT)))
+    return _result(
+        router.collect_posts(
+            query,
+            max_cost_usd=budget,
+            limit=clamp_limit(limit, default=MAX_LIMIT, maximum=MAX_COLLECT_LIMIT),
+        )
+    )
 
 
 def create_mcp_server(router: XDataRouter | None = None) -> Any:
@@ -237,69 +305,114 @@ def create_mcp_server(router: XDataRouter | None = None) -> Any:
     mcp = FastMCP(
         "x-data",
         instructions=(
-            "Read-only X data tools. Use task tools only; provider routing is "
-            "internal and credentials are never exposed."
+            "Read-only X data tools. Use task tools only; provider routing and "
+            "credentials are internal. Every data request must include "
+            "`max_cost_usd`. Use `0` for free-only routing. Prefer summary "
+            "diagnostics unless detailed output is explicitly needed."
         ),
     )
 
     @mcp.tool()
-    def x_fetch_urls(values: list[str]) -> dict[str, Any]:
-        """Fetch exact X/Twitter post URLs or raw post IDs."""
-        return x_fetch_urls_handler(values, router=active_router)
+    def x_fetch_urls(
+        values: Annotated[list[str], Field(description="Exact post URLs or raw post IDs.")],
+        max_cost_usd: MaxCostUsd,
+    ) -> dict[str, Any]:
+        """Fetch exact posts only. Use `0` to forbid paid fallback."""
+        return x_fetch_urls_handler(values, max_cost_usd=max_cost_usd, router=active_router)
 
     @mcp.tool()
-    def x_read_user_posts(user: str, limit: int = DEFAULT_LIMIT) -> dict[str, Any]:
-        """Read recent public posts for one X user."""
-        return x_read_user_posts_handler(user, limit=limit, router=active_router)
+    def x_read_user_posts(
+        user: Annotated[str, Field(description="X handle, with or without @.")],
+        max_cost_usd: MaxCostUsd,
+        limit: Annotated[int, Field(description="Max posts to return.", ge=1, le=MAX_LIMIT)] = DEFAULT_LIMIT,
+    ) -> dict[str, Any]:
+        """Read recent public posts for one user. Use `0` for free-only routing."""
+        return x_read_user_posts_handler(user, max_cost_usd=max_cost_usd, limit=limit, router=active_router)
 
     @mcp.tool()
-    def x_search_posts(query: str, limit: int = DEFAULT_LIMIT) -> dict[str, Any]:
-        """Search X posts through the internal provider router."""
-        return x_search_posts_handler(query, limit=limit, router=active_router)
+    def x_search_posts(
+        query: Annotated[str, Field(description="X search query.")],
+        max_cost_usd: MaxCostUsd,
+        limit: Annotated[int, Field(description="Max posts to return.", ge=1, le=MAX_LIMIT)] = DEFAULT_LIMIT,
+    ) -> dict[str, Any]:
+        """Search public X posts. Use `0` for free-only routing."""
+        return x_search_posts_handler(query, max_cost_usd=max_cost_usd, limit=limit, router=active_router)
 
     @mcp.tool()
-    def x_read_owned_timeline(limit: int = DEFAULT_LIMIT) -> dict[str, Any]:
-        """Read the authenticated account timeline via the official provider."""
-        return x_read_owned_timeline_handler(limit=limit, router=active_router)
+    def x_read_owned_timeline(
+        max_cost_usd: MaxCostUsd,
+        limit: Annotated[int, Field(description="Max posts to return.", ge=1, le=MAX_LIMIT)] = DEFAULT_LIMIT,
+    ) -> dict[str, Any]:
+        """Read the authenticated account timeline. Usually paid."""
+        return x_read_owned_timeline_handler(max_cost_usd=max_cost_usd, limit=limit, router=active_router)
 
     @mcp.tool()
-    def x_read_mentions(limit: int = DEFAULT_LIMIT) -> dict[str, Any]:
-        """Read mentions for the authenticated account via the official provider."""
-        return x_read_mentions_handler(limit=limit, router=active_router)
+    def x_read_mentions(
+        max_cost_usd: MaxCostUsd,
+        limit: Annotated[int, Field(description="Max posts to return.", ge=1, le=MAX_LIMIT)] = DEFAULT_LIMIT,
+    ) -> dict[str, Any]:
+        """Read mentions for the authenticated account. Usually paid."""
+        return x_read_mentions_handler(max_cost_usd=max_cost_usd, limit=limit, router=active_router)
 
     @mcp.tool()
-    def x_read_thread(value: str, limit: int = MAX_LIMIT) -> dict[str, Any]:
-        """Read a thread/conversation by X/Twitter post URL or raw post ID."""
-        return x_read_thread_handler(value, limit=limit, router=active_router)
+    def x_read_thread(
+        value: Annotated[str, Field(description="Post URL or raw post ID.")],
+        max_cost_usd: MaxCostUsd,
+        limit: Annotated[int, Field(description="Max posts to return.", ge=1, le=MAX_LIMIT)] = MAX_LIMIT,
+    ) -> dict[str, Any]:
+        """Read a thread from one post URL or ID."""
+        return x_read_thread_handler(value, max_cost_usd=max_cost_usd, limit=limit, router=active_router)
 
     @mcp.tool()
-    def x_read_replies(value: str, limit: int = MAX_LIMIT) -> dict[str, Any]:
-        """Read replies for an X/Twitter post URL or raw post ID."""
-        return x_read_replies_handler(value, limit=limit, router=active_router)
+    def x_read_replies(
+        value: Annotated[str, Field(description="Post URL or raw post ID.")],
+        max_cost_usd: MaxCostUsd,
+        limit: Annotated[int, Field(description="Max replies to return.", ge=1, le=MAX_LIMIT)] = MAX_LIMIT,
+    ) -> dict[str, Any]:
+        """Read replies for one post URL or ID."""
+        return x_read_replies_handler(value, max_cost_usd=max_cost_usd, limit=limit, router=active_router)
 
     @mcp.tool()
-    def x_read_quotes(value: str, limit: int = MAX_LIMIT) -> dict[str, Any]:
-        """Read quote posts for an X/Twitter post URL or raw post ID."""
-        return x_read_quotes_handler(value, limit=limit, router=active_router)
+    def x_read_quotes(
+        value: Annotated[str, Field(description="Post URL or raw post ID.")],
+        max_cost_usd: MaxCostUsd,
+        limit: Annotated[int, Field(description="Max quote posts to return.", ge=1, le=MAX_LIMIT)] = MAX_LIMIT,
+    ) -> dict[str, Any]:
+        """Read quote posts for one post URL or ID."""
+        return x_read_quotes_handler(value, max_cost_usd=max_cost_usd, limit=limit, router=active_router)
 
     @mcp.tool()
-    def x_read_follow_graph(user: str, graph: str = "followers", limit: int = MAX_LIMIT) -> dict[str, Any]:
-        """Read followers or following for one X user."""
-        return x_read_follow_graph_handler(user, graph=graph, limit=limit, router=active_router)
+    def x_read_follow_graph(
+        user: Annotated[str, Field(description="X handle, with or without @.")],
+        max_cost_usd: MaxCostUsd,
+        graph: Annotated[FollowGraph, Field(description="Read followers or following.")] = "followers",
+        limit: Annotated[int, Field(description="Max users to return.", ge=1, le=MAX_LIMIT)] = MAX_LIMIT,
+    ) -> dict[str, Any]:
+        """Read followers or following for one user."""
+        return x_read_follow_graph_handler(user, max_cost_usd=max_cost_usd, graph=graph, limit=limit, router=active_router)
 
     @mcp.tool()
-    def x_collect_posts(query: str, limit: int = MAX_LIMIT) -> dict[str, Any]:
-        """Collect posts for monitoring or bulk workflows through the router."""
-        return x_collect_posts_handler(query, limit=limit, router=active_router)
+    def x_collect_posts(
+        query: Annotated[str, Field(description="Collection query or monitor term.")],
+        max_cost_usd: MaxCostUsd,
+        limit: Annotated[int, Field(description="Max posts to return.", ge=1, le=MAX_COLLECT_LIMIT)] = MAX_LIMIT,
+    ) -> dict[str, Any]:
+        """Collect posts for monitoring. Often paid; set budget carefully."""
+        return x_collect_posts_handler(query, max_cost_usd=max_cost_usd, limit=limit, router=active_router)
 
     @mcp.tool()
-    def x_data_status(detail: str = "summary") -> dict[str, Any]:
-        """Return token-safe provider and route status."""
+    def x_data_status(
+        detail: Annotated[DetailLevel, Field(description="Use summary by default; detailed only when needed.")] = "summary",
+    ) -> dict[str, Any]:
+        """Return server status. Prefer `summary`; request `detailed` only when debugging."""
         return x_data_status_handler(detail=detail, router=active_router)
 
     @mcp.tool()
-    def x_data_healthcheck(mode: str = "live", detail: str = "summary") -> dict[str, Any]:
-        """Run active provider diagnostics. Use basic/live/deep to control probe depth."""
+    def x_data_healthcheck(
+        mode: Annotated[HealthcheckMode, Field(description="basic=no live reads, live=small probe, deep=multiple probes.")] = "live",
+        detail: Annotated[DetailLevel, Field(description="Use summary by default; detailed only when needed.")] = "summary",
+    ) -> dict[str, Any]:
+        """Run diagnostics. Prefer `basic` or `live`; use `deep` only for troubleshooting."""
         return x_data_healthcheck_handler(mode=mode, detail=detail, router=active_router)
 
     return mcp
