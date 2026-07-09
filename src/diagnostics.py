@@ -99,7 +99,7 @@ def provider_status_report(name: str, provider: Any) -> dict[str, Any]:
     report = {
         "provider": name,
         "implemented": implemented,
-        "enabled": implemented,
+        "enabled": bool(raw_status.get("enabled", implemented)),
         "configured": bool(raw_status.get("configured", implemented)),
         "class": provider.__class__.__name__,
         "auth_required": auth_required,
@@ -190,6 +190,8 @@ def doctor_summary_from_status(status_payload: dict[str, Any]) -> dict[str, Any]
     healthy_providers = []
     degraded_providers = []
     for name, report in providers.items():
+        if not report.get("enabled", True) or not report.get("implemented", True):
+            continue
         if report.get("usable"):
             healthy_providers.append(name)
         else:
@@ -248,6 +250,8 @@ def doctor_summary_from_healthcheck(health_payload: dict[str, Any]) -> dict[str,
 
     provider_summaries = {}
     for name, report in providers.items():
+        if not report.get("enabled", True) or not report.get("implemented", True):
+            continue
         probes = report.get("probes") or []
         ok_count = sum(1 for probe in probes if probe.get("ok"))
         failed = [probe for probe in probes if not probe.get("ok")]

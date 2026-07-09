@@ -147,6 +147,41 @@ def test_doctor_summary_from_status_prioritizes_blockers():
     assert "twikit: cookie expires in 23.1 days" in summary["provider_notes"]
 
 
+def test_doctor_summary_ignores_disabled_or_stub_providers_in_overall_health():
+    summary = doctor_summary_from_status(
+        {
+            "providers": {
+                "syndication": {
+                    "implemented": True,
+                    "enabled": True,
+                    "usable": True,
+                    "warnings": [],
+                    "auth_required": False,
+                    "auth_present": None,
+                    "auth_valid": True,
+                    "status": {},
+                },
+                "xpoz": {
+                    "implemented": False,
+                    "enabled": False,
+                    "usable": False,
+                    "warnings": [],
+                    "auth_required": False,
+                    "auth_present": None,
+                    "auth_valid": True,
+                    "status": {},
+                },
+            },
+            "task_coverage": {
+                "fetch_urls": {"available": True, "preferred_provider": "syndication"},
+            },
+        }
+    )
+
+    assert summary["overall"] == "healthy"
+    assert summary["degraded_providers"] == []
+
+
 def test_doctor_summary_from_healthcheck_summarizes_probe_failures():
     summary = doctor_summary_from_healthcheck(
         {

@@ -8,6 +8,7 @@ from pydantic import Field
 from src.config import load_config
 from src.contracts import ProviderResult
 from src.diagnostics import doctor_summary_from_healthcheck, doctor_summary_from_status
+from src.providers.syndication import normalize_handle
 from src.router import XDataRouter
 
 _SERVER_CONFIG = load_config()["server"]
@@ -86,10 +87,10 @@ def x_read_user_posts_handler(
     budget = validate_max_cost_usd(max_cost_usd)
     if budget is None:
         return _result(ProviderResult.error(provider="mcp", reason="missing_or_invalid_max_cost_usd"))
-    user = str(user or "").strip()
+    user = normalize_handle(user)
     if not user:
         return _result(ProviderResult.error(provider="mcp", reason="missing_user"))
-    return _result(router.read_user_posts_recent(user, max_cost_usd=budget, limit=clamp_limit(limit)))
+    return _result(router.read_user_posts_recent(f"@{user}", max_cost_usd=budget, limit=clamp_limit(limit)))
 
 
 def x_search_posts_handler(
@@ -255,7 +256,7 @@ def x_read_follow_graph_handler(
     budget = validate_max_cost_usd(max_cost_usd)
     if budget is None:
         return _result(ProviderResult.error(provider="mcp", reason="missing_or_invalid_max_cost_usd"))
-    user = str(user or "").strip()
+    user = normalize_handle(user)
     graph = str(graph or "").strip().lower()
     if not user:
         return _result(ProviderResult.error(provider="mcp", reason="missing_user"))
@@ -267,7 +268,9 @@ def x_read_follow_graph_handler(
                 metadata={"allowed": sorted(FOLLOW_GRAPHS)},
             )
         )
-    return _result(router.read_follow_graph(user, max_cost_usd=budget, graph=graph, limit=clamp_limit(limit, default=MAX_LIMIT)))
+    return _result(
+        router.read_follow_graph(f"@{user}", max_cost_usd=budget, graph=graph, limit=clamp_limit(limit, default=MAX_LIMIT))
+    )
 
 
 def x_collect_posts_handler(

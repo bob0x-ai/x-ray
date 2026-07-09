@@ -74,7 +74,10 @@ def extract_post_id(value: str) -> str | None:
 
 
 def normalize_handle(value: str) -> str:
-    return str(value or "").strip().lstrip("@")
+    normalized = str(value or "").strip().lstrip("@")
+    if normalized.startswith("http://") or normalized.startswith("https://"):
+        return ""
+    return normalized
 
 
 def _int_or_none(value: Any) -> int | None:

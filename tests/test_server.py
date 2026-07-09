@@ -161,6 +161,7 @@ def test_new_handlers_reject_missing_or_invalid_inputs():
     assert x_read_follow_graph_handler("", max_cost_usd=0, router=_Router())["reason"] == "missing_user"
     assert x_read_follow_graph_handler("@alice", max_cost_usd=0, graph="likes", router=_Router())["reason"] == "invalid_graph"
     assert x_collect_posts_handler("", max_cost_usd=0, router=_Router())["reason"] == "missing_query"
+    assert x_read_user_posts_handler("https://x.com/alice", max_cost_usd=0, router=_Router())["reason"] == "missing_user"
 
 
 def test_budget_is_required_for_request_handlers():
