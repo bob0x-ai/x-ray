@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from src.config import DEFAULT_CONFIG, load_config
 from src.router import XDataRouter
 

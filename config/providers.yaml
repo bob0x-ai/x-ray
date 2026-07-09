@@ -27,6 +27,12 @@ providers:
 
   twikit:
     enabled: false
+    cookies_file: "/home/ubuntu/.hermes/x_cookies.json"
+    locale: "en-US"
+    cooldown_seconds: 300
+    rate_limit:
+      requests_per_minute: 6
+      jitter_seconds: 0.75
 
   twscrape:
     enabled: false

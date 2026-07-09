@@ -255,6 +255,13 @@ Implementation notes if we add it later:
   `cooldown_active`, `last_rate_limit`, or `last_soft_failure` rather than
   hiding the failure mode completely.
 
+Current implementation choice:
+
+- Cookie-file session reuse only in v1.
+- No automated login flow inside this provider.
+- Supported tasks in the first implementation: `search_posts` and
+  `read_user_posts_recent`.
+
 ### twscrape
 
 twscrape is an async Python library/CLI for X search and GraphQL endpoints. It

@@ -41,7 +41,16 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "enabled": True,
         },
         "xpoz": {"enabled": False},
-        "twikit": {"enabled": False},
+        "twikit": {
+            "enabled": False,
+            "cookies_file": "/home/ubuntu/.hermes/x_cookies.json",
+            "locale": "en-US",
+            "cooldown_seconds": 300,
+            "rate_limit": {
+                "requests_per_minute": 6,
+                "jitter_seconds": 0.75,
+            },
+        },
         "twscrape": {"enabled": False},
         "apify": {"enabled": False},
         "xactions": {"enabled": False},
@@ -66,8 +75,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "read_follow_graph": ["socialdata", "xpoz", "twscrape", "twikit", "apify", "official_x"],
         "collect_posts": ["socialdata", "xpoz", "twscrape", "twikit", "apify"],
     },
-    "smoke": {
-        "user": "@OpenAI",
+        "smoke": {
+            "user": "@OpenAI",
         "search_query": "from:OpenAI",
         "collect_query": "OpenAI",
         "graph": "followers",

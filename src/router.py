@@ -12,6 +12,7 @@ from src.providers.official_x import OfficialXProvider
 from src.providers.socialdata import SocialDataProvider
 from src.providers.stub import StubProvider
 from src.providers.syndication import SyndicationProvider
+from src.providers.twikit import TwikitProvider
 
 DEFAULT_ROUTES: dict[str, list[str]] = load_config()["routes"]
 
@@ -204,7 +205,7 @@ def default_providers(config: dict[str, Any] | None = None) -> dict[str, Any]:
         "official_x": _build_official_x_provider(provider_config.get("official_x", {})),
         "socialdata": _build_socialdata_provider(provider_config.get("socialdata", {})),
         "xpoz": _build_stub_provider("xpoz", provider_config.get("xpoz", {})),
-        "twikit": _build_stub_provider("twikit", provider_config.get("twikit", {})),
+        "twikit": _build_twikit_provider(provider_config.get("twikit", {})),
         "twscrape": _build_stub_provider("twscrape", provider_config.get("twscrape", {})),
         "apify": _build_stub_provider("apify", provider_config.get("apify", {})),
         "xactions": _build_stub_provider("xactions", provider_config.get("xactions", {})),
@@ -239,6 +240,20 @@ def _build_official_x_provider(config: dict[str, Any]) -> Any:
     if config.get("enabled", True) is False:
         return StubProvider("official_x")
     return OfficialXProvider()
+
+
+def _build_twikit_provider(config: dict[str, Any]) -> Any:
+    if config.get("enabled", False) is False:
+        return StubProvider("twikit")
+    rate_limit = config.get("rate_limit", {})
+    return TwikitProvider(
+        cookies_file=str(config.get("cookies_file") or ""),
+        locale=str(config.get("locale") or "en-US"),
+        cooldown_seconds=int(config.get("cooldown_seconds", 300)),
+        requests_per_minute=_float_or_default(rate_limit.get("requests_per_minute"), 6),
+        min_interval_seconds=_float_or_none(rate_limit.get("min_interval_seconds")),
+        jitter_seconds=_float_or_default(rate_limit.get("jitter_seconds"), 0.75),
+    )
 
 
 def _build_stub_provider(name: str, config: dict[str, Any]) -> Any:
