@@ -126,6 +126,7 @@ def test_read_user_posts_handler_clamps_limit():
     result = x_read_user_posts_handler("@alice", max_cost_usd=0, limit=999, router=router)
 
     assert result["status"] == "ok"
+    assert result["items"][0] == {"id": "2", "text": "user"}
     assert router.calls == [("read_user_posts_recent", "@alice", 100)]
 
 
@@ -134,6 +135,25 @@ def test_search_posts_handler_returns_router_result():
 
     assert result["status"] == "empty"
     assert result["reason"] == "all_routes_exhausted"
+
+
+def test_handler_omits_provider_raw_payloads_from_items():
+    router = _Router()
+    router.search_posts = lambda query, *, max_cost_usd, limit=20: ProviderResult.ok(  # type: ignore[method-assign]
+        provider="test",
+        items=[
+            Post(
+                id="9",
+                text="search result",
+                raw={"quoted_status": {"id_str": "1"}, "user": {"screen_name": "alice"}},
+            )
+        ],
+    )
+
+    result = x_search_posts_handler("ai", max_cost_usd=0, limit=5, router=router)
+
+    assert result["status"] == "ok"
+    assert result["items"] == [{"id": "9", "text": "search result"}]
 
 
 def test_new_handlers_validate_and_call_router():

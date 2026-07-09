@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import Annotated, Any, Literal
 
 from pydantic import Field
 from src.config import load_config
-from src.contracts import ProviderResult
+from src.contracts import Post, ProviderResult, UserProfile
 from src.diagnostics import doctor_summary_from_healthcheck, doctor_summary_from_status
 from src.providers.syndication import normalize_handle
 from src.router import XDataRouter
@@ -39,7 +40,53 @@ def clamp_limit(limit: int | None, *, default: int = DEFAULT_LIMIT, maximum: int
 
 
 def _result(result: ProviderResult) -> dict[str, Any]:
-    return result.to_dict()
+    payload: dict[str, Any] = {
+        "status": result.status,
+        "provider": result.provider,
+        "items": [_serialize_item(item) for item in result.items],
+    }
+    if result.reason is not None:
+        payload["reason"] = result.reason
+    if result.warnings:
+        payload["warnings"] = list(result.warnings)
+    if result.cost is not None:
+        payload["cost"] = asdict(result.cost)
+    if result.raw_ref is not None:
+        payload["raw_ref"] = result.raw_ref
+    if result.metadata:
+        payload["metadata"] = dict(result.metadata)
+    return payload
+
+
+def _serialize_item(item: Any) -> dict[str, Any]:
+    if isinstance(item, Post):
+        payload = {
+            "id": item.id,
+            "text": item.text,
+            "author": asdict(item.author) if item.author is not None else None,
+            "created_at": item.created_at,
+            "metrics": asdict(item.metrics) if item.metrics is not None else None,
+            "source_url": item.source_url,
+        }
+        return {key: value for key, value in payload.items() if value is not None}
+    if isinstance(item, UserProfile):
+        payload = {
+            "id": item.id,
+            "username": item.username,
+            "name": item.name,
+            "description": item.description,
+            "public_metrics": item.public_metrics,
+            "source_url": item.source_url,
+        }
+        return {key: value for key, value in payload.items() if value is not None}
+    if hasattr(item, "__dict__"):
+        data = dict(item.__dict__)
+    elif isinstance(item, dict):
+        data = dict(item)
+    else:
+        return {"value": item}
+    data.pop("raw", None)
+    return data
 
 
 def validate_max_cost_usd(value: float | int | str | None) -> float | None:
@@ -311,7 +358,9 @@ def create_mcp_server(router: XDataRouter | None = None) -> Any:
             "Read-only X data tools. Use task tools only; provider routing and "
             "credentials are internal. Every data request must include "
             "`max_cost_usd`. Use `0` for free-only routing. Prefer summary "
-            "diagnostics unless detailed output is explicitly needed."
+            "diagnostics unless detailed output is explicitly needed. For user "
+            "inputs, pass an X handle only, for example `@OpenAI` or `OpenAI`; "
+            "do not pass a profile URL."
         ),
     )
 
@@ -325,11 +374,11 @@ def create_mcp_server(router: XDataRouter | None = None) -> Any:
 
     @mcp.tool()
     def x_read_user_posts(
-        user: Annotated[str, Field(description="X handle, with or without @.")],
+        user: Annotated[str, Field(description="X handle only, with or without @, for example `@OpenAI` or `OpenAI`. Do not pass a profile URL.")],
         max_cost_usd: MaxCostUsd,
         limit: Annotated[int, Field(description="Max posts to return.", ge=1, le=MAX_LIMIT)] = DEFAULT_LIMIT,
     ) -> dict[str, Any]:
-        """Read recent public posts for one user. Use `0` for free-only routing."""
+        """Read recent public posts for one user handle. Do not pass a profile URL. Use `0` for free-only routing."""
         return x_read_user_posts_handler(user, max_cost_usd=max_cost_usd, limit=limit, router=active_router)
 
     @mcp.tool()
@@ -386,12 +435,12 @@ def create_mcp_server(router: XDataRouter | None = None) -> Any:
 
     @mcp.tool()
     def x_read_follow_graph(
-        user: Annotated[str, Field(description="X handle, with or without @.")],
+        user: Annotated[str, Field(description="X handle only, with or without @, for example `@OpenAI` or `OpenAI`. Do not pass a profile URL.")],
         max_cost_usd: MaxCostUsd,
         graph: Annotated[FollowGraph, Field(description="Read followers or following.")] = "followers",
         limit: Annotated[int, Field(description="Max users to return.", ge=1, le=MAX_LIMIT)] = MAX_LIMIT,
     ) -> dict[str, Any]:
-        """Read followers or following for one user."""
+        """Read followers or following for one user handle. Do not pass a profile URL."""
         return x_read_follow_graph_handler(user, max_cost_usd=max_cost_usd, graph=graph, limit=limit, router=active_router)
 
     @mcp.tool()
