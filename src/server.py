@@ -4,13 +4,15 @@ from __future__ import annotations
 
 from typing import Any
 
+from src.config import load_config
 from src.contracts import ProviderResult
 from src.router import XDataRouter
 
-DEFAULT_LIMIT = 20
-MAX_LIMIT = 100
-MAX_FETCH_URLS = 25
-MAX_COLLECT_LIMIT = 500
+_SERVER_CONFIG = load_config()["server"]
+DEFAULT_LIMIT = int(_SERVER_CONFIG["default_limit"])
+MAX_LIMIT = int(_SERVER_CONFIG["max_limit"])
+MAX_FETCH_URLS = int(_SERVER_CONFIG["max_fetch_urls"])
+MAX_COLLECT_LIMIT = int(_SERVER_CONFIG["max_collect_limit"])
 FOLLOW_GRAPHS = {"followers", "following"}
 
 

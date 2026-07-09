@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import random
+import time
 from typing import Any, Protocol
 
 from src.contracts import ProviderResult
@@ -87,3 +89,48 @@ class CooldownMixin:
                 "cooldown_seconds_remaining": status["cooldown_seconds_remaining"],
             },
         )
+
+
+class RateLimiterMixin:
+    """Transparent in-process pacing for polite provider usage."""
+
+    def __init__(
+        self,
+        *,
+        time_fn: Callable[[], float] = time.time,
+        sleep_fn: Callable[[float], None] = time.sleep,
+        random_fn: Callable[[], float] = random.random,
+        requests_per_minute: float | None = None,
+        min_interval_seconds: float | None = None,
+        jitter_seconds: float = 0.0,
+    ) -> None:
+        derived_interval = 0.0
+        if requests_per_minute and requests_per_minute > 0:
+            derived_interval = 60.0 / float(requests_per_minute)
+        self._time_fn = time_fn
+        self._sleep_fn = sleep_fn
+        self._random_fn = random_fn
+        self._min_interval_seconds = max(float(min_interval_seconds or derived_interval), 0.0)
+        self._jitter_seconds = max(float(jitter_seconds), 0.0)
+        self._next_request_at: float = 0.0
+
+    def _wait_for_rate_limit(self) -> None:
+        if self._min_interval_seconds <= 0:
+            return
+        now = self._time_fn()
+        if now < self._next_request_at:
+            self._sleep_fn(self._next_request_at - now)
+            now = self._next_request_at
+        jitter = self._random_fn() * self._jitter_seconds if self._jitter_seconds > 0 else 0.0
+        if jitter > 0:
+            self._sleep_fn(jitter)
+        self._next_request_at = now + jitter + self._min_interval_seconds
+
+    def _rate_limit_status(self) -> dict[str, Any]:
+        return {
+            "local_rate_limit": {
+                "enabled": self._min_interval_seconds > 0,
+                "min_interval_seconds": self._min_interval_seconds,
+                "jitter_seconds": self._jitter_seconds,
+            }
+        }

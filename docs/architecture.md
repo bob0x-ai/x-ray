@@ -436,11 +436,13 @@ surface. The agent sees task-level tools; the code owns backend choice.
 Implemented starting point:
 
 - Shared contracts: `src/contracts.py`
+- Config loader: `src/config.py`
 - Router: `src/router.py`
 - Stub provider: `src/providers/stub.py`
 - Real providers: `src/providers/syndication.py`,
   `src/providers/official_x.py`, and `src/providers/socialdata.py`
 - MCP wrapper: `src/server.py`
+- Default behavior config: `config/providers.yaml`
 
 ## MCP Server Wrapper
 
@@ -467,6 +469,8 @@ Tool constraints:
 - `limit` defaults to `20` and clamps to `1..100`.
 - `x_fetch_urls` accepts at most `25` values per call in v1.
 - `x_collect_posts` clamps to `1..500`.
+- Route order, provider enablement, cooldown settings, local pacing, and server
+  limits should be tuned through `config/providers.yaml`, not by editing code.
 - Tool handlers return normalized JSON-serializable provider results.
 - `x_data_status` reports only token-safe booleans and provider status.
 - A stdio MCP integration test verifies tool listing, absence of provider

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import random
 import re
 import time
 from collections.abc import Callable
@@ -14,13 +15,15 @@ from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from src.contracts import Metrics, Post, ProviderResult, UserRef
-from src.providers.base import CooldownMixin
+from src.providers.base import CooldownMixin, RateLimiterMixin
 
 PROVIDER_NAME = "syndication"
 TWEET_RESULT_URL = "https://cdn.syndication.twimg.com/tweet-result?id={id}&token=a"
 TIMELINE_PROFILE_URL = "https://syndication.twitter.com/srv/timeline-profile/screen-name/{handle}"
 DEFAULT_TIMEOUT_SECONDS = 10
 DEFAULT_COOLDOWN_SECONDS = 60
+DEFAULT_REQUESTS_PER_MINUTE = 12
+DEFAULT_JITTER_SECONDS = 0.35
 USER_AGENT = "x-mcp/0.1 (+https://github.com/local/x-mcp)"
 
 _STATUS_RE = re.compile(
@@ -183,7 +186,7 @@ def _walk_for_tweet_dicts(value: Any) -> list[dict[str, Any]]:
     return found
 
 
-class SyndicationProvider(CooldownMixin):
+class SyndicationProvider(CooldownMixin, RateLimiterMixin):
     name = PROVIDER_NAME
 
     def __init__(
@@ -193,8 +196,22 @@ class SyndicationProvider(CooldownMixin):
         timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
         cooldown_seconds: int = DEFAULT_COOLDOWN_SECONDS,
         time_fn: Callable[[], float] = time.time,
+        sleep_fn: Callable[[float], None] = time.sleep,
+        random_fn: Callable[[], float] = random.random,
+        requests_per_minute: float = DEFAULT_REQUESTS_PER_MINUTE,
+        min_interval_seconds: float | None = None,
+        jitter_seconds: float = DEFAULT_JITTER_SECONDS,
     ) -> None:
         super().__init__(time_fn=time_fn, cooldown_seconds=cooldown_seconds)
+        RateLimiterMixin.__init__(
+            self,
+            time_fn=time_fn,
+            sleep_fn=sleep_fn,
+            random_fn=random_fn,
+            requests_per_minute=requests_per_minute,
+            min_interval_seconds=min_interval_seconds,
+            jitter_seconds=jitter_seconds,
+        )
         self._http_get = http_get
         self._timeout_seconds = timeout_seconds
 
@@ -211,6 +228,7 @@ class SyndicationProvider(CooldownMixin):
                 "timeline_parse_is_best_effort",
             ],
             **self._cooldown_status(),
+            **self._rate_limit_status(),
         }
 
     def fetch_urls(self, values: list[str]) -> ProviderResult:
@@ -226,6 +244,7 @@ class SyndicationProvider(CooldownMixin):
                 warnings.append(f"invalid_post_reference:{value}")
                 continue
             url = TWEET_RESULT_URL.format(id=quote(post_id))
+            self._wait_for_rate_limit()
             try:
                 response = self._http_get(url, self._timeout_seconds)
             except Exception as exc:
@@ -286,6 +305,7 @@ class SyndicationProvider(CooldownMixin):
             return ProviderResult.error(provider=self.name, reason="missing_handle")
         capped_limit = max(1, min(int(limit), 20))
         url = TIMELINE_PROFILE_URL.format(handle=quote(handle))
+        self._wait_for_rate_limit()
         try:
             response = self._http_get(url, self._timeout_seconds)
         except Exception as exc:

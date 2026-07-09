@@ -10,6 +10,10 @@ for X data without choosing or misusing a raw backend.
 Hermes integration details and the recommended stdio wrapper setup live in
 [docs/hermes-integration.md](/home/ubuntu/projects/x_mcp/docs/hermes-integration.md).
 
+Runtime behavior is configured through
+[config/providers.yaml](/home/ubuntu/projects/x_mcp/config/providers.yaml).
+Secrets stay in environment variables such as `SOCIALDATA_API_KEY`.
+
 Initial scope:
 
 - Search public X posts.
@@ -43,9 +47,30 @@ Notes:
 
 - `--env-file` is optional and only loads known X-provider credential keys into
   the current process.
+- Smoke defaults come from `config/providers.yaml` and can be overridden by CLI
+  flags.
 - The harness currently focuses on `socialdata` plus router checks, with
   `syndication` and `official_x` status included for context.
 - It is intended for live validation, not CI.
+
+## Config
+
+Behavior tuning lives in `config/providers.yaml`.
+
+Current config surface:
+
+- server limits: `default_limit`, `max_limit`, `max_fetch_urls`,
+  `max_collect_limit`
+- provider enable/disable flags
+- provider cooldown and local rate-limiter settings
+- route order per task
+- default smoke inputs
+
+Override the config path with:
+
+```bash
+X_MCP_CONFIG_FILE=/abs/path/to/providers.yaml
+```
 
 ## Hermes Integration
 

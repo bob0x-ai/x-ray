@@ -9,6 +9,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from src.config import load_config
 from src.contracts import Post, ProviderResult, UserProfile
 from src.providers.official_x import OfficialXProvider
 from src.providers.socialdata import SocialDataProvider
@@ -30,6 +31,8 @@ KNOWN_ENV_KEYS = {
 
 
 def parse_args() -> argparse.Namespace:
+    config = load_config()
+    smoke_defaults = config.get("smoke", {})
     parser = argparse.ArgumentParser(description="Run a live smoke check against X data providers.")
     parser.add_argument(
         "--env-file",
@@ -38,29 +41,29 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--user",
-        default="@OpenAI",
+        default=smoke_defaults.get("user", "@OpenAI"),
         help="Seed user for recent-post and graph reads.",
     )
     parser.add_argument(
         "--search-query",
-        default="from:OpenAI",
+        default=smoke_defaults.get("search_query", "from:OpenAI"),
         help="Search query for search smoke checks.",
     )
     parser.add_argument(
         "--collect-query",
-        default="OpenAI",
+        default=smoke_defaults.get("collect_query", "OpenAI"),
         help="Collection query for bulk/search smoke checks.",
     )
     parser.add_argument(
         "--graph",
-        default="followers",
+        default=smoke_defaults.get("graph", "followers"),
         choices=["followers", "following"],
         help="Graph direction for follow-graph reads.",
     )
     parser.add_argument(
         "--limit",
         type=int,
-        default=3,
+        default=int(smoke_defaults.get("limit", 3)),
         help="Default item limit for lightweight checks.",
     )
     parser.add_argument(

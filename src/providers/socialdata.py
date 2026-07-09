@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -13,13 +14,15 @@ from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
 from src.contracts import CostEstimate, Metrics, Post, ProviderResult, UserProfile, UserRef
-from src.providers.base import CooldownMixin
+from src.providers.base import CooldownMixin, RateLimiterMixin
 from src.providers.syndication import extract_post_id, normalize_handle
 
 PROVIDER_NAME = "socialdata"
 API_BASE_URL = "https://api.socialdata.tools/twitter"
 DEFAULT_TIMEOUT_SECONDS = 20
 DEFAULT_COOLDOWN_SECONDS = 60
+DEFAULT_REQUESTS_PER_MINUTE = 20
+DEFAULT_JITTER_SECONDS = 0.25
 ITEM_COST_USD = 0.0002
 USER_AGENT = "x-mcp/0.1 (+https://github.com/local/x-mcp)"
 
@@ -137,7 +140,7 @@ def user_from_payload(payload: dict[str, Any]) -> UserProfile | None:
     )
 
 
-class SocialDataProvider(CooldownMixin):
+class SocialDataProvider(CooldownMixin, RateLimiterMixin):
     name = PROVIDER_NAME
 
     def __init__(
@@ -147,8 +150,22 @@ class SocialDataProvider(CooldownMixin):
         timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
         cooldown_seconds: int = DEFAULT_COOLDOWN_SECONDS,
         time_fn: Callable[[], float] = time.time,
+        sleep_fn: Callable[[float], None] = time.sleep,
+        random_fn: Callable[[], float] = random.random,
+        requests_per_minute: float = DEFAULT_REQUESTS_PER_MINUTE,
+        min_interval_seconds: float | None = None,
+        jitter_seconds: float = DEFAULT_JITTER_SECONDS,
     ) -> None:
         super().__init__(time_fn=time_fn, cooldown_seconds=cooldown_seconds)
+        RateLimiterMixin.__init__(
+            self,
+            time_fn=time_fn,
+            sleep_fn=sleep_fn,
+            random_fn=random_fn,
+            requests_per_minute=requests_per_minute,
+            min_interval_seconds=min_interval_seconds,
+            jitter_seconds=jitter_seconds,
+        )
         self._http_get = http_get
         self._timeout_seconds = timeout_seconds
 
@@ -181,6 +198,7 @@ class SocialDataProvider(CooldownMixin):
                 "following",
             ],
             **self._cooldown_status(),
+            **self._rate_limit_status(),
         }
 
     def fetch_urls(self, values: list[str]) -> ProviderResult:
@@ -496,6 +514,7 @@ class SocialDataProvider(CooldownMixin):
             )
 
         url = _build_url(path, params)
+        self._wait_for_rate_limit()
         try:
             response = self._http_get(
                 url,

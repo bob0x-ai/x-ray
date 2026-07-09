@@ -6,32 +6,14 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from src.config import load_config
 from src.contracts import ProviderResult
 from src.providers.official_x import OfficialXProvider
 from src.providers.socialdata import SocialDataProvider
 from src.providers.stub import StubProvider
 from src.providers.syndication import SyndicationProvider
 
-DEFAULT_ROUTES: dict[str, list[str]] = {
-    "fetch_urls": ["syndication", "official_x", "socialdata", "apify"],
-    "read_user_posts_recent": [
-        "socialdata",
-        "syndication",
-        "twikit",
-        "twscrape",
-        "xpoz",
-        "apify",
-        "official_x",
-    ],
-    "search_posts": ["socialdata", "xpoz", "twikit", "twscrape", "apify", "official_x"],
-    "read_owned_timeline": ["official_x"],
-    "read_mentions": ["official_x"],
-    "read_thread": ["twikit", "twscrape", "socialdata", "xpoz", "apify", "official_x"],
-    "read_replies": ["socialdata", "xpoz", "apify", "twikit", "twscrape", "official_x"],
-    "read_quotes": ["socialdata", "xpoz", "apify", "twikit", "twscrape", "official_x"],
-    "read_follow_graph": ["socialdata", "xpoz", "twscrape", "twikit", "apify", "official_x"],
-    "collect_posts": ["socialdata", "xpoz", "twscrape", "twikit", "apify"],
-}
+DEFAULT_ROUTES: dict[str, list[str]] = load_config()["routes"]
 
 
 TASK_METHODS: dict[str, tuple[str, ...]] = {
@@ -74,9 +56,11 @@ class XDataRouter:
         *,
         providers: Mapping[str, Any] | None = None,
         routes: Mapping[str, list[str]] | None = None,
+        config: dict[str, Any] | None = None,
     ) -> None:
-        self.routes = dict(routes or DEFAULT_ROUTES)
-        self.providers = dict(providers or default_providers())
+        self.config = config or load_config()
+        self.routes = dict(routes or self.config["routes"] or DEFAULT_ROUTES)
+        self.providers = dict(providers or default_providers(self.config))
 
     def fetch_urls(self, values: list[str]) -> ProviderResult:
         return self.run_task("fetch_urls", values=values)
@@ -134,6 +118,7 @@ class XDataRouter:
                 task: (effective_routes[task][0] if effective_routes[task] else None)
                 for task in self.routes
             },
+            "config_path": self.config.get("config_path"),
             "tasks": sorted(self.routes),
         }
 
@@ -211,17 +196,71 @@ class XDataRouter:
         )
 
 
-def default_providers() -> dict[str, Any]:
+def default_providers(config: dict[str, Any] | None = None) -> dict[str, Any]:
+    config = config or load_config()
+    provider_config = config.get("providers", {})
     return {
-        "syndication": SyndicationProvider(),
-        "official_x": OfficialXProvider(),
-        "socialdata": SocialDataProvider(),
-        "xpoz": StubProvider("xpoz"),
-        "twikit": StubProvider("twikit"),
-        "twscrape": StubProvider("twscrape"),
-        "apify": StubProvider("apify"),
-        "xactions": StubProvider("xactions"),
+        "syndication": _build_syndication_provider(provider_config.get("syndication", {})),
+        "official_x": _build_official_x_provider(provider_config.get("official_x", {})),
+        "socialdata": _build_socialdata_provider(provider_config.get("socialdata", {})),
+        "xpoz": _build_stub_provider("xpoz", provider_config.get("xpoz", {})),
+        "twikit": _build_stub_provider("twikit", provider_config.get("twikit", {})),
+        "twscrape": _build_stub_provider("twscrape", provider_config.get("twscrape", {})),
+        "apify": _build_stub_provider("apify", provider_config.get("apify", {})),
+        "xactions": _build_stub_provider("xactions", provider_config.get("xactions", {})),
     }
+
+
+def _build_syndication_provider(config: dict[str, Any]) -> Any:
+    if config.get("enabled", True) is False:
+        return StubProvider("syndication")
+    rate_limit = config.get("rate_limit", {})
+    return SyndicationProvider(
+        cooldown_seconds=int(config.get("cooldown_seconds", 60)),
+        requests_per_minute=_float_or_default(rate_limit.get("requests_per_minute"), 12),
+        min_interval_seconds=_float_or_none(rate_limit.get("min_interval_seconds")),
+        jitter_seconds=_float_or_default(rate_limit.get("jitter_seconds"), 0.35),
+    )
+
+
+def _build_socialdata_provider(config: dict[str, Any]) -> Any:
+    if config.get("enabled", True) is False:
+        return StubProvider("socialdata")
+    rate_limit = config.get("rate_limit", {})
+    return SocialDataProvider(
+        cooldown_seconds=int(config.get("cooldown_seconds", 60)),
+        requests_per_minute=_float_or_default(rate_limit.get("requests_per_minute"), 20),
+        min_interval_seconds=_float_or_none(rate_limit.get("min_interval_seconds")),
+        jitter_seconds=_float_or_default(rate_limit.get("jitter_seconds"), 0.25),
+    )
+
+
+def _build_official_x_provider(config: dict[str, Any]) -> Any:
+    if config.get("enabled", True) is False:
+        return StubProvider("official_x")
+    return OfficialXProvider()
+
+
+def _build_stub_provider(name: str, config: dict[str, Any]) -> Any:
+    if config.get("enabled", False) is True:
+        return StubProvider(name)
+    return StubProvider(name)
+
+
+def _float_or_default(value: Any, default: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _float_or_none(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _task_kwargs(task: str, kwargs: dict[str, Any]) -> dict[str, Any]:

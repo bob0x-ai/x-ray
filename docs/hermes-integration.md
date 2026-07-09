@@ -19,6 +19,12 @@ The wrapper:
 - changes into the repo root
 - starts the MCP server with `python3 -m src.server`
 
+Provider behavior is configured separately in:
+
+`/home/ubuntu/projects/x_mcp/config/providers.yaml`
+
+Secrets remain in env vars such as `SOCIALDATA_API_KEY`.
+
 ## Recommended Hermes config
 
 Add this under `mcp_servers` in `~/.hermes/config.yaml`:

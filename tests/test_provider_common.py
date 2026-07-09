@@ -60,7 +60,7 @@ def _providers():
 
         return HttpResponse(status_code=200, text=json.dumps(POST_PAYLOAD))
 
-    yield SyndicationProvider(http_get=syndication_get)
+    yield SyndicationProvider(http_get=syndication_get, min_interval_seconds=0, jitter_seconds=0)
 
     with _env(X_OAUTH2_ACCESS_TOKEN="token"):
         yield OfficialXProvider(client_factory=lambda token: _MockClient())
@@ -75,7 +75,7 @@ def _providers():
         return SocialDataHttpResponse(status_code=200, text=json.dumps(payload))
 
     with _env(SOCIALDATA_API_KEY="token"):
-        yield SocialDataProvider(http_get=socialdata_get)
+        yield SocialDataProvider(http_get=socialdata_get, min_interval_seconds=0, jitter_seconds=0)
 
 
 def test_exact_post_fetch_contract_across_providers():

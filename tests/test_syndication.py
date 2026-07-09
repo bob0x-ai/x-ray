@@ -26,7 +26,7 @@ def test_fetch_urls_returns_unavailable_for_deleted_or_protected_post():
         del url, timeout
         return HttpResponse(status_code=404, text="")
 
-    provider = SyndicationProvider(http_get=http_get)
+    provider = SyndicationProvider(http_get=http_get, min_interval_seconds=0, jitter_seconds=0)
     result = provider.fetch_urls(["https://x.com/alice/status/1234567890"])
 
     assert result.status == "unavailable"
@@ -39,7 +39,7 @@ def test_fetch_urls_returns_unavailable_for_rate_limit():
         del url, timeout
         return HttpResponse(status_code=429, text="rate limited")
 
-    provider = SyndicationProvider(http_get=http_get)
+    provider = SyndicationProvider(http_get=http_get, min_interval_seconds=0, jitter_seconds=0)
     result = provider.fetch_urls(["1234567890"])
 
     assert result.status == "unavailable"
@@ -63,7 +63,7 @@ def test_fetch_urls_parses_tweet_result_json():
         assert "tweet-result" in url
         return HttpResponse(status_code=200, text=json.dumps(payload))
 
-    provider = SyndicationProvider(http_get=http_get)
+    provider = SyndicationProvider(http_get=http_get, min_interval_seconds=0, jitter_seconds=0)
     result = provider.fetch_urls(["1234567890"])
 
     assert result.status == "ok"
@@ -86,7 +86,7 @@ def test_read_user_posts_parses_embedded_json_script():
         assert "screen-name/alice" in url
         return HttpResponse(status_code=200, text=html)
 
-    provider = SyndicationProvider(http_get=http_get)
+    provider = SyndicationProvider(http_get=http_get, min_interval_seconds=0, jitter_seconds=0)
     result = provider.read_user_posts("@alice", limit=1)
 
     assert result.status == "ok"
@@ -99,7 +99,7 @@ def test_read_user_posts_empty_when_no_parseable_posts():
         del url, timeout
         return HttpResponse(status_code=200, text="<html></html>")
 
-    provider = SyndicationProvider(http_get=http_get)
+    provider = SyndicationProvider(http_get=http_get, min_interval_seconds=0, jitter_seconds=0)
     result = provider.read_user_posts("alice")
 
     assert result.status == "empty"
@@ -111,7 +111,7 @@ def test_read_user_posts_returns_unavailable_for_rate_limit():
         del url, timeout
         return HttpResponse(status_code=429, text="rate limited")
 
-    provider = SyndicationProvider(http_get=http_get)
+    provider = SyndicationProvider(http_get=http_get, min_interval_seconds=0, jitter_seconds=0)
     result = provider.read_user_posts("alice")
 
     assert result.status == "unavailable"
@@ -131,7 +131,13 @@ def test_rate_limit_activates_syndication_cooldown():
         calls["count"] += 1
         return HttpResponse(status_code=429, text="rate limited")
 
-    provider = SyndicationProvider(http_get=http_get, cooldown_seconds=30, time_fn=time_fn)
+    provider = SyndicationProvider(
+        http_get=http_get,
+        cooldown_seconds=30,
+        time_fn=time_fn,
+        min_interval_seconds=0,
+        jitter_seconds=0,
+    )
 
     first = provider.fetch_urls(["1234567890"])
     second = provider.fetch_urls(["1234567890"])
@@ -145,3 +151,41 @@ def test_rate_limit_activates_syndication_cooldown():
     assert status["cooldown_active"] is True
     assert status["cooldown_reason"] == "rate_limited"
     assert calls["count"] == 1
+
+
+def test_local_rate_limiter_waits_transparently():
+    now = {"value": 100.0}
+    sleeps: list[float] = []
+    payload = {
+        "id_str": "1234567890",
+        "text": "A post",
+        "user": {"id_str": "42", "screen_name": "alice", "name": "Alice"},
+    }
+
+    def time_fn():
+        return now["value"]
+
+    def sleep_fn(seconds):
+        sleeps.append(seconds)
+        now["value"] += seconds
+
+    def http_get(url, timeout):
+        del url, timeout
+        return HttpResponse(status_code=200, text=json.dumps(payload))
+
+    provider = SyndicationProvider(
+        http_get=http_get,
+        time_fn=time_fn,
+        sleep_fn=sleep_fn,
+        random_fn=lambda: 0.0,
+        min_interval_seconds=2.0,
+        jitter_seconds=0.0,
+    )
+
+    first = provider.fetch_urls(["1234567890"])
+    second = provider.fetch_urls(["1234567890"])
+
+    assert first.status == "ok"
+    assert second.status == "ok"
+    assert sleeps == [2.0]
+    assert provider.status()["local_rate_limit"]["enabled"] is True
