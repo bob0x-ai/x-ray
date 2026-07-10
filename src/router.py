@@ -10,6 +10,7 @@ from typing import Any
 from src.config import load_config
 from src.contracts import CostEstimate, ProviderResult
 from src.diagnostics import provider_health_report, provider_status_report, task_coverage_summary
+from src.providers.getxapi import GetXApiProvider
 from src.providers.official_x import OfficialXProvider
 from src.providers.socialdata import SocialDataProvider
 from src.providers.stub import StubProvider
@@ -29,6 +30,7 @@ TASK_METHODS: dict[str, tuple[str, ...]] = {
     "read_replies": ("read_replies",),
     "read_quotes": ("read_quotes",),
     "read_follow_graph": ("read_follow_graph",),
+    "read_article": ("read_article",),
     "collect_posts": ("collect_posts",),
 }
 
@@ -143,6 +145,9 @@ class XDataRouter:
             cursor=cursor,
             max_cost_usd=max_cost_usd,
         )
+
+    def read_article(self, value: str, *, max_cost_usd: float) -> ProviderResult:
+        return self.run_task("read_article", value=value, max_cost_usd=max_cost_usd)
 
     def collect_posts(
         self,
@@ -336,6 +341,7 @@ def default_providers(config: dict[str, Any] | None = None) -> dict[str, Any]:
         "official_x": _build_official_x_provider(provider_config.get("official_x", {})),
         "socialdata": _build_socialdata_provider(provider_config.get("socialdata", {})),
         "xpoz": _build_stub_provider("xpoz", provider_config.get("xpoz", {})),
+        "getxapi": _build_getxapi_provider(provider_config.get("getxapi", {})),
         "twikit": _build_twikit_provider(provider_config.get("twikit", {})),
         "twscrape": _build_stub_provider("twscrape", provider_config.get("twscrape", {})),
         "apify": _build_stub_provider("apify", provider_config.get("apify", {})),
@@ -371,6 +377,18 @@ def _build_official_x_provider(config: dict[str, Any]) -> Any:
     if config.get("enabled", True) is False:
         return StubProvider("official_x")
     return OfficialXProvider()
+
+
+def _build_getxapi_provider(config: dict[str, Any]) -> Any:
+    if config.get("enabled", True) is False:
+        return StubProvider("getxapi")
+    rate_limit = config.get("rate_limit", {})
+    return GetXApiProvider(
+        cooldown_seconds=int(config.get("cooldown_seconds", 60)),
+        requests_per_minute=_float_or_default(rate_limit.get("requests_per_minute"), 20),
+        min_interval_seconds=_float_or_none(rate_limit.get("min_interval_seconds")),
+        jitter_seconds=_float_or_default(rate_limit.get("jitter_seconds"), 0.2),
+    )
 
 
 def _build_twikit_provider(config: dict[str, Any]) -> Any:
@@ -427,6 +445,8 @@ def _task_kwargs(task: str, kwargs: dict[str, Any]) -> dict[str, Any]:
             "limit": kwargs.get("limit", 100),
             "cursor": kwargs.get("cursor"),
         }
+    if task == "read_article":
+        return {"value": kwargs["value"]}
     if task == "collect_posts":
         return {"query": kwargs["query"], "limit": kwargs.get("limit", 100), "cursor": kwargs.get("cursor")}
     return kwargs

@@ -49,6 +49,10 @@ class XDataProvider(Protocol):
         """Read followers or following for one user."""
         ...
 
+    def read_article(self, value: str) -> ProviderResult:
+        """Read a published X Article by wrapper tweet URL or wrapper tweet ID."""
+        ...
+
     def collect_posts(self, query: str, *, limit: int = 100) -> ProviderResult:
         """Collect posts for monitoring/bulk workflows."""
         ...

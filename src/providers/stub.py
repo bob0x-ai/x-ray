@@ -47,6 +47,10 @@ class StubProvider:
         del user, graph, limit
         return self._not_implemented("read_follow_graph")
 
+    def read_article(self, value: str) -> ProviderResult:
+        del value
+        return self._not_implemented("read_article")
+
     def collect_posts(self, query: str, *, limit: int = 100) -> ProviderResult:
         del query, limit
         return self._not_implemented("collect_posts")

@@ -50,7 +50,40 @@ class UserProfile:
     raw: dict[str, Any] = field(default_factory=dict)
 
 
-ProviderItem: TypeAlias = Post | UserProfile
+@dataclass(frozen=True)
+class ArticleImage:
+    url: str
+    width: int | None = None
+    height: int | None = None
+
+
+@dataclass(frozen=True)
+class ArticleBlock:
+    type: str
+    text: str | None = None
+    url: str | None = None
+    width: int | None = None
+    height: int | None = None
+    inline_style_ranges: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class Article:
+    id: str
+    title: str
+    body_text: str
+    author: UserRef | None = None
+    created_at: str | None = None
+    metrics: Metrics | None = None
+    preview_text: str | None = None
+    cover_image_url: str | None = None
+    source_url: str | None = None
+    images: list[ArticleImage] = field(default_factory=list)
+    blocks: list[ArticleBlock] = field(default_factory=list)
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+ProviderItem: TypeAlias = Post | UserProfile | Article
 
 
 @dataclass(frozen=True)

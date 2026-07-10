@@ -40,6 +40,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "official_x": {
             "enabled": True,
         },
+        "getxapi": {
+            "enabled": True,
+            "cooldown_seconds": 60,
+            "rate_limit": {
+                "requests_per_minute": 20,
+                "jitter_seconds": 0.2,
+            },
+        },
         "xpoz": {"enabled": False},
         "twikit": {
             "enabled": False,
@@ -73,6 +81,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "read_replies": ["socialdata", "xpoz", "apify", "twikit", "twscrape", "official_x"],
         "read_quotes": ["socialdata", "xpoz", "apify", "twikit", "twscrape", "official_x"],
         "read_follow_graph": ["socialdata", "xpoz", "twscrape", "twikit", "apify", "official_x"],
+        "read_article": ["getxapi"],
         "collect_posts": ["socialdata", "xpoz", "twscrape", "twikit", "apify"],
     },
         "smoke": {

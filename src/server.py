@@ -8,7 +8,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import Field
 from src.config import load_config
-from src.contracts import Post, ProviderResult, UserProfile
+from src.contracts import Article, Post, ProviderResult, UserProfile
 from src.diagnostics import doctor_summary_from_healthcheck, doctor_summary_from_status
 from src.providers.syndication import normalize_handle
 from src.router import XDataRouter
@@ -97,6 +97,21 @@ def _serialize_item(item: Any) -> dict[str, Any]:
             "source_url": item.source_url,
         }
         return {key: value for key, value in payload.items() if value is not None}
+    if isinstance(item, Article):
+        payload = {
+            "id": item.id,
+            "title": item.title,
+            "body_text": item.body_text,
+            "author": asdict(item.author) if item.author is not None else None,
+            "created_at": item.created_at,
+            "metrics": asdict(item.metrics) if item.metrics is not None else None,
+            "preview_text": item.preview_text,
+            "cover_image_url": item.cover_image_url,
+            "source_url": item.source_url,
+            "images": [asdict(image) for image in item.images],
+            "blocks": [asdict(block) for block in item.blocks],
+        }
+        return {key: value for key, value in payload.items() if value not in (None, [], "")}
     if isinstance(item, UserProfile):
         payload = {
             "id": item.id,
@@ -578,6 +593,22 @@ def x_read_follow_graph_handler(
     )
 
 
+def x_read_article_handler(
+    value: str,
+    *,
+    max_cost_usd: float | int | str | None,
+    router: XDataRouter | None = None,
+) -> dict[str, Any]:
+    router = router or XDataRouter()
+    budget = validate_max_cost_usd(max_cost_usd)
+    if budget is None:
+        return _result(ProviderResult.error(provider="mcp", reason="missing_or_invalid_max_cost_usd"))
+    value = str(value or "").strip()
+    if not value:
+        return _result(ProviderResult.error(provider="mcp", reason="missing_value"))
+    return _result(router.read_article(value, max_cost_usd=budget))
+
+
 def x_collect_posts_handler(
     query: str,
     *,
@@ -628,7 +659,8 @@ def create_mcp_server(router: XDataRouter | None = None) -> Any:
             "the call returns `needs_approval`. Prefer summary diagnostics "
             "unless detailed output is explicitly needed. For user inputs, pass "
             "an X handle or numeric user ID; do not pass a profile URL. Use "
-            "`metadata.next_cursor` to continue paginated list calls."
+            "`metadata.next_cursor` to continue paginated list calls. Use `x_read_article` "
+            "for published X Articles by wrapper tweet share link or wrapper tweet ID."
         ),
     )
 
@@ -855,6 +887,22 @@ def create_mcp_server(router: XDataRouter | None = None) -> Any:
             cursor=cursor,
             router=active_router,
         )
+
+    @mcp.tool()
+    def x_read_article(
+        value: Annotated[
+            str,
+            Field(
+                description=(
+                    "Wrapper tweet URL or raw wrapper tweet ID for a published X Article. "
+                    "Use the article share/status link from X. Direct `x.com/i/article/...` URLs are not supported in v1."
+                )
+            ),
+        ],
+        max_cost_usd: MaxCostUsd,
+    ) -> dict[str, Any]:
+        """Read a published X Article through its wrapper tweet share link or wrapper tweet ID. Returns structured article text, blocks, images, author, and metadata."""
+        return x_read_article_handler(value, max_cost_usd=max_cost_usd, router=active_router)
 
     @mcp.tool()
     def x_collect_posts(

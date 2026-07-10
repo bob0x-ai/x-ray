@@ -10,6 +10,7 @@ from src.server import (
     x_read_follow_graph_handler,
     x_read_quotes_handler,
     x_read_replies_handler,
+    x_read_article_handler,
     x_read_thread_handler,
     x_read_user_posts_handler,
     x_search_posts_handler,
@@ -54,6 +55,11 @@ class _Router:
         del max_cost_usd
         self.calls.append(("read_follow_graph", user, graph, limit, cursor))
         return ProviderResult.empty(provider="router", reason="all_routes_exhausted")
+
+    def read_article(self, value, *, max_cost_usd):
+        del max_cost_usd
+        self.calls.append(("read_article", value))
+        return ProviderResult.ok(provider="test", items=[{"id": "a1", "title": "Article"}])
 
     def collect_posts(self, query, *, max_cost_usd, limit=100, cursor=None):
         del max_cost_usd
@@ -163,6 +169,7 @@ def test_new_handlers_validate_and_call_router():
     assert x_read_replies_handler("123", max_cost_usd=0, limit=8, router=router)["status"] == "empty"
     assert x_read_quotes_handler("123", max_cost_usd=0, limit=9, router=router)["status"] == "empty"
     assert x_read_follow_graph_handler("@alice", max_cost_usd=0, graph="following", limit=10, router=router)["status"] == "empty"
+    assert x_read_article_handler("123", max_cost_usd=0, router=router)["status"] == "ok"
     assert x_collect_posts_handler("ai", max_cost_usd=0, limit=9999, router=router)["status"] == "empty"
 
     assert router.calls == [
@@ -170,6 +177,7 @@ def test_new_handlers_validate_and_call_router():
         ("read_replies", "123", 8, None),
         ("read_quotes", "123", 9, None),
         ("read_follow_graph", "@alice", "following", 10, None),
+        ("read_article", "123"),
         ("collect_posts", "ai", 500, None),
     ]
 
@@ -182,6 +190,7 @@ def test_new_handlers_reject_missing_or_invalid_inputs():
     assert x_read_follow_graph_handler("@alice", max_cost_usd=0, graph="likes", router=_Router())["reason"] == "invalid_graph"
     assert x_collect_posts_handler("", max_cost_usd=0, router=_Router())["reason"] == "missing_query"
     assert x_read_user_posts_handler("https://x.com/alice", max_cost_usd=0, router=_Router())["reason"] == "missing_user"
+    assert x_read_article_handler("", max_cost_usd=0, router=_Router())["reason"] == "missing_value"
     assert x_search_posts_handler("ai", max_cost_usd=0, start_date="bad", router=_Router())["reason"] == "invalid_time_window"
     assert x_read_thread_handler("123", max_cost_usd=0, scope="sideways", router=_Router())["reason"] == "invalid_scope"
 

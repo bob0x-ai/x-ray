@@ -30,6 +30,7 @@ def test_mcp_stdio_lists_tools_and_calls_status():
                 "x_read_replies",
                 "x_read_quotes",
                 "x_read_follow_graph",
+                "x_read_article",
                 "x_collect_posts",
                 "x_data_status",
                 "x_data_healthcheck",

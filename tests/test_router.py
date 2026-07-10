@@ -38,6 +38,10 @@ class _Provider:
         self.calls.append(("read_follow_graph", user, graph, limit, cursor))
         return self.result
 
+    def read_article(self, value):
+        self.calls.append(("read_article", value))
+        return self.result
+
     def collect_posts(self, query, *, limit=100, cursor=None):
         self.calls.append(("collect_posts", query, limit, cursor))
         return self.result
@@ -182,6 +186,7 @@ def test_new_matrix_tasks_route_to_provider_methods():
             "read_replies": ["p"],
             "read_quotes": ["p"],
             "read_follow_graph": ["p"],
+            "read_article": ["p"],
             "collect_posts": ["p"],
         },
     )
@@ -190,6 +195,7 @@ def test_new_matrix_tasks_route_to_provider_methods():
     assert router.read_replies("123", max_cost_usd=0, limit=12).status == "ok"
     assert router.read_quotes("123", max_cost_usd=0, limit=13).status == "ok"
     assert router.read_follow_graph("@alice", max_cost_usd=0, graph="following", limit=14).status == "ok"
+    assert router.read_article("123", max_cost_usd=0).status == "ok"
     assert router.collect_posts("ai", max_cost_usd=0, limit=15).status == "ok"
 
     assert provider.calls == [
@@ -197,6 +203,7 @@ def test_new_matrix_tasks_route_to_provider_methods():
         ("read_replies", "123", 12, None),
         ("read_quotes", "123", 13, None),
         ("read_follow_graph", "@alice", "following", 14, None),
+        ("read_article", "123"),
         ("collect_posts", "ai", 15, None),
     ]
 
@@ -243,6 +250,7 @@ def test_new_matrix_tasks_return_stubbed_empty_by_default():
     assert router.read_replies("123", max_cost_usd=0).status == "needs_approval"
     assert router.read_quotes("123", max_cost_usd=0).status == "needs_approval"
     assert router.read_follow_graph("@alice", max_cost_usd=0).status == "needs_approval"
+    assert router.read_article("123", max_cost_usd=0).status == "needs_approval"
     assert router.collect_posts("ai", max_cost_usd=0).status == "needs_approval"
 
 

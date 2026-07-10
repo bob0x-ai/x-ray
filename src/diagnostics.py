@@ -79,6 +79,7 @@ TASK_METHODS: dict[str, tuple[str, ...]] = {
     "read_replies": ("read_replies",),
     "read_quotes": ("read_quotes",),
     "read_follow_graph": ("read_follow_graph",),
+    "read_article": ("read_article",),
     "collect_posts": ("collect_posts",),
 }
 

@@ -50,6 +50,7 @@ def test_router_uses_configured_routes_and_provider_enablement():
         "providers": {
             "socialdata": {"enabled": False},
             "official_x": {"enabled": True},
+            "getxapi": {"enabled": True},
             "syndication": {"enabled": True},
             "xpoz": {"enabled": False},
             "twikit": {"enabled": False},
@@ -67,6 +68,7 @@ def test_router_uses_configured_routes_and_provider_enablement():
             "read_replies": ["official_x"],
             "read_quotes": ["official_x"],
             "read_follow_graph": ["official_x"],
+            "read_article": ["getxapi"],
             "collect_posts": ["socialdata"],
         },
     }
