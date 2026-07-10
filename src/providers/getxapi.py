@@ -13,6 +13,7 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+import requests
 
 from src.contracts import Article, ArticleBlock, ArticleImage, CostEstimate, Metrics, ProviderResult, UserRef
 from src.providers.base import CooldownMixin, RateLimiterMixin
@@ -40,6 +41,7 @@ class HttpResponse:
 
 
 HttpGet = Callable[[str, dict[str, str], int], HttpResponse]
+HTTP_RETRY_ATTEMPTS = 3
 
 
 def default_http_get(
@@ -47,24 +49,43 @@ def default_http_get(
     headers: dict[str, str],
     timeout: int = DEFAULT_TIMEOUT_SECONDS,
 ) -> HttpResponse:
-    request = Request(url, headers={"User-Agent": USER_AGENT, **headers})
     try:
-        with urlopen(request, timeout=timeout) as response:
-            try:
+        response = requests.get(
+            url,
+            headers={"User-Agent": USER_AGENT, **headers},
+            timeout=timeout,
+        )
+        return HttpResponse(
+            status_code=response.status_code,
+            text=response.text,
+            headers=dict(response.headers),
+        )
+    except requests.RequestException:
+        pass
+
+    request = Request(url, headers={"User-Agent": USER_AGENT, **headers})
+    last_incomplete: IncompleteRead | None = None
+    for _ in range(HTTP_RETRY_ATTEMPTS):
+        try:
+            with urlopen(request, timeout=timeout) as response:
                 raw_body = response.read()
-            except IncompleteRead as exc:
-                raw_body = exc.partial
-            body = raw_body.decode("utf-8", errors="replace")
-            return HttpResponse(
-                status_code=getattr(response, "status", 200),
-                text=body,
-                headers=dict(response.headers.items()),
-            )
-    except HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        return HttpResponse(status_code=exc.code, text=body, headers=dict(exc.headers.items()))
-    except URLError as exc:
-        raise RuntimeError(str(exc)) from exc
+                body = raw_body.decode("utf-8", errors="replace")
+                return HttpResponse(
+                    status_code=getattr(response, "status", 200),
+                    text=body,
+                    headers=dict(response.headers.items()),
+                )
+        except IncompleteRead as exc:
+            last_incomplete = exc
+            continue
+        except HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")
+            return HttpResponse(status_code=exc.code, text=body, headers=dict(exc.headers.items()))
+        except URLError as exc:
+            raise RuntimeError(str(exc)) from exc
+    if last_incomplete is not None:
+        raise RuntimeError(f"IncompleteRead({len(last_incomplete.partial)} bytes read)") from last_incomplete
+    raise RuntimeError("unexpected_http_read_failure")
 
 
 def _metrics_from_article(payload: dict[str, Any]) -> Metrics | None:
