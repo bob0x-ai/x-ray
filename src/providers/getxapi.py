@@ -8,6 +8,7 @@ import random
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from http.client import IncompleteRead
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -49,7 +50,11 @@ def default_http_get(
     request = Request(url, headers={"User-Agent": USER_AGENT, **headers})
     try:
         with urlopen(request, timeout=timeout) as response:
-            body = response.read().decode("utf-8", errors="replace")
+            try:
+                raw_body = response.read()
+            except IncompleteRead as exc:
+                raw_body = exc.partial
+            body = raw_body.decode("utf-8", errors="replace")
             return HttpResponse(
                 status_code=getattr(response, "status", 200),
                 text=body,
