@@ -14,32 +14,32 @@ class _Provider:
         self.calls.append(("fetch_urls", values))
         return self.result
 
-    def read_user_posts(self, user, *, limit=20):
-        self.calls.append(("read_user_posts", user, limit))
+    def read_user_posts(self, user, *, limit=20, cursor=None):
+        self.calls.append(("read_user_posts", user, limit, cursor))
         return self.result
 
-    def search_posts(self, query, *, limit=20):
-        self.calls.append(("search_posts", query, limit))
+    def search_posts(self, query, *, limit=20, cursor=None):
+        self.calls.append(("search_posts", query, limit, cursor))
         return self.result
 
-    def read_thread(self, value, *, limit=100):
-        self.calls.append(("read_thread", value, limit))
+    def read_thread(self, value, *, limit=100, cursor=None):
+        self.calls.append(("read_thread", value, limit, cursor))
         return self.result
 
-    def read_replies(self, value, *, limit=100):
-        self.calls.append(("read_replies", value, limit))
+    def read_replies(self, value, *, limit=100, cursor=None):
+        self.calls.append(("read_replies", value, limit, cursor))
         return self.result
 
-    def read_quotes(self, value, *, limit=100):
-        self.calls.append(("read_quotes", value, limit))
+    def read_quotes(self, value, *, limit=100, cursor=None):
+        self.calls.append(("read_quotes", value, limit, cursor))
         return self.result
 
-    def read_follow_graph(self, user, *, graph="followers", limit=100):
-        self.calls.append(("read_follow_graph", user, graph, limit))
+    def read_follow_graph(self, user, *, graph="followers", limit=100, cursor=None):
+        self.calls.append(("read_follow_graph", user, graph, limit, cursor))
         return self.result
 
-    def collect_posts(self, query, *, limit=100):
-        self.calls.append(("collect_posts", query, limit))
+    def collect_posts(self, query, *, limit=100, cursor=None):
+        self.calls.append(("collect_posts", query, limit, cursor))
         return self.result
 
     def estimate_cost(self, task, **kwargs):
@@ -170,7 +170,7 @@ def test_read_user_posts_passes_user_and_limit():
     result = router.read_user_posts_recent("@alice", max_cost_usd=0, limit=7)
 
     assert result.status == "ok"
-    assert provider.calls == [("read_user_posts", "@alice", 7)]
+    assert provider.calls == [("read_user_posts", "@alice", 7, None)]
 
 
 def test_new_matrix_tasks_route_to_provider_methods():
@@ -193,12 +193,47 @@ def test_new_matrix_tasks_route_to_provider_methods():
     assert router.collect_posts("ai", max_cost_usd=0, limit=15).status == "ok"
 
     assert provider.calls == [
-        ("read_thread", "123", 11),
-        ("read_replies", "123", 12),
-        ("read_quotes", "123", 13),
-        ("read_follow_graph", "@alice", "following", 14),
-        ("collect_posts", "ai", 15),
+        ("read_thread", "123", 11, None),
+        ("read_replies", "123", 12, None),
+        ("read_quotes", "123", 13, None),
+        ("read_follow_graph", "@alice", "following", 14, None),
+        ("collect_posts", "ai", 15, None),
     ]
+
+
+def test_cursor_is_passed_when_provider_supports_it():
+    provider = _Provider("p", ProviderResult.ok(provider="p", items=[Post(id="1", text="ok")]))
+    router = XDataRouter(
+        providers={"p": provider},
+        routes={"search_posts": ["p"]},
+    )
+
+    result = router.search_posts("ai", max_cost_usd=0, limit=5, cursor="cursor-1")
+
+    assert result.status == "ok"
+    assert provider.calls == [("search_posts", "ai", 5, "cursor-1")]
+
+
+def test_cursor_is_ignored_for_provider_methods_without_support():
+    class _NoCursorProvider:
+        name = "nocursor"
+
+        def estimate_cost(self, task, **kwargs):
+            del task, kwargs
+            return CostEstimate(amount_usd=0.0, basis="test")
+
+        def search_posts(self, query, *, limit=20):
+            return ProviderResult.ok(provider=self.name, items=[Post(id="1", text=f"{query}:{limit}")])
+
+    router = XDataRouter(
+        providers={"nocursor": _NoCursorProvider()},
+        routes={"search_posts": ["nocursor"]},
+    )
+
+    result = router.search_posts("ai", max_cost_usd=0, limit=5, cursor="cursor-1")
+
+    assert result.status == "ok"
+    assert result.items[0].text == "ai:5"
 
 
 def test_new_matrix_tasks_return_stubbed_empty_by_default():

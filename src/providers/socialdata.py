@@ -283,7 +283,7 @@ class SocialDataProvider(CooldownMixin, RateLimiterMixin):
             )
         return ProviderResult.empty(provider=self.name)
 
-    def read_user_posts(self, user: str, *, limit: int = 20) -> ProviderResult:
+    def read_user_posts(self, user: str, *, limit: int = 20, cursor: str | None = None) -> ProviderResult:
         blocked = self._cooldown_unavailable(self.name)
         if blocked:
             return blocked
@@ -294,10 +294,11 @@ class SocialDataProvider(CooldownMixin, RateLimiterMixin):
         return self._collect_posts(
             path=f"/user/{quote(user_id)}/tweets",
             limit=limit,
+            cursor=cursor,
             metadata={"user_id": user_id},
         )
 
-    def search_posts(self, query: str, *, limit: int = 20) -> ProviderResult:
+    def search_posts(self, query: str, *, limit: int = 20, cursor: str | None = None) -> ProviderResult:
         blocked = self._cooldown_unavailable(self.name)
         if blocked:
             return blocked
@@ -307,11 +308,12 @@ class SocialDataProvider(CooldownMixin, RateLimiterMixin):
         return self._collect_posts(
             path="/search",
             limit=limit,
+            cursor=cursor,
             params={"query": query, "type": "Latest"},
             metadata={"query": query, "search_type": "Latest"},
         )
 
-    def read_thread(self, value: str, *, limit: int = 100) -> ProviderResult:
+    def read_thread(self, value: str, *, limit: int = 100, cursor: str | None = None) -> ProviderResult:
         blocked = self._cooldown_unavailable(self.name)
         if blocked:
             return blocked
@@ -321,10 +323,11 @@ class SocialDataProvider(CooldownMixin, RateLimiterMixin):
         return self._collect_posts(
             path=f"/thread/{quote(post_id)}",
             limit=limit,
+            cursor=cursor,
             metadata={"thread_id": post_id},
         )
 
-    def read_replies(self, value: str, *, limit: int = 100) -> ProviderResult:
+    def read_replies(self, value: str, *, limit: int = 100, cursor: str | None = None) -> ProviderResult:
         blocked = self._cooldown_unavailable(self.name)
         if blocked:
             return blocked
@@ -334,11 +337,12 @@ class SocialDataProvider(CooldownMixin, RateLimiterMixin):
         return self._collect_posts(
             path=f"/tweets/{quote(post_id)}/comments",
             limit=limit,
+            cursor=cursor,
             warnings=["top_level_post_only"],
             metadata={"post_id": post_id},
         )
 
-    def read_quotes(self, value: str, *, limit: int = 100) -> ProviderResult:
+    def read_quotes(self, value: str, *, limit: int = 100, cursor: str | None = None) -> ProviderResult:
         blocked = self._cooldown_unavailable(self.name)
         if blocked:
             return blocked
@@ -348,10 +352,18 @@ class SocialDataProvider(CooldownMixin, RateLimiterMixin):
         return self._collect_posts(
             path=f"/tweets/{quote(post_id)}/quotes",
             limit=limit,
+            cursor=cursor,
             metadata={"post_id": post_id},
         )
 
-    def read_follow_graph(self, user: str, *, graph: str = "followers", limit: int = 100) -> ProviderResult:
+    def read_follow_graph(
+        self,
+        user: str,
+        *,
+        graph: str = "followers",
+        limit: int = 100,
+        cursor: str | None = None,
+    ) -> ProviderResult:
         blocked = self._cooldown_unavailable(self.name)
         if blocked:
             return blocked
@@ -365,11 +377,12 @@ class SocialDataProvider(CooldownMixin, RateLimiterMixin):
         return self._collect_users(
             path=path,
             limit=limit,
+            cursor=cursor,
             params={"user_id": user_id},
             metadata={"graph": graph, "user_id": user_id},
         )
 
-    def collect_posts(self, query: str, *, limit: int = 100) -> ProviderResult:
+    def collect_posts(self, query: str, *, limit: int = 100, cursor: str | None = None) -> ProviderResult:
         blocked = self._cooldown_unavailable(self.name)
         if blocked:
             return blocked
@@ -379,6 +392,7 @@ class SocialDataProvider(CooldownMixin, RateLimiterMixin):
         return self._collect_posts(
             path="/search",
             limit=limit,
+            cursor=cursor,
             params={"query": query, "type": "Latest"},
             metadata={"query": query, "search_type": "Latest", "mode": "bulk"},
         )
@@ -403,6 +417,7 @@ class SocialDataProvider(CooldownMixin, RateLimiterMixin):
         *,
         path: str,
         limit: int,
+        cursor: str | None = None,
         params: dict[str, Any] | None = None,
         warnings: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
@@ -411,7 +426,6 @@ class SocialDataProvider(CooldownMixin, RateLimiterMixin):
         items: list[Post] = []
         notes = list(warnings or [])
         next_cursor: str | None = None
-        cursor: str | None = None
 
         while len(items) < capped_limit:
             page_params = dict(params or {})
@@ -470,13 +484,13 @@ class SocialDataProvider(CooldownMixin, RateLimiterMixin):
         *,
         path: str,
         limit: int,
+        cursor: str | None = None,
         params: dict[str, Any] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> ProviderResult:
         capped_limit = max(1, int(limit))
         items: list[UserProfile] = []
         next_cursor: str | None = None
-        cursor: str | None = None
 
         while len(items) < capped_limit:
             page_params = dict(params or {})

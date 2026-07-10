@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+import inspect
 from typing import Any
 
 from src.config import load_config
@@ -69,11 +70,25 @@ class XDataRouter:
     def fetch_urls(self, values: list[str], *, max_cost_usd: float) -> ProviderResult:
         return self.run_task("fetch_urls", values=values, max_cost_usd=max_cost_usd)
 
-    def read_user_posts_recent(self, user: str, *, max_cost_usd: float, limit: int = 20) -> ProviderResult:
-        return self.run_task("read_user_posts_recent", user=user, limit=limit, max_cost_usd=max_cost_usd)
+    def read_user_posts_recent(
+        self,
+        user: str,
+        *,
+        max_cost_usd: float,
+        limit: int = 20,
+        cursor: str | None = None,
+    ) -> ProviderResult:
+        return self.run_task("read_user_posts_recent", user=user, limit=limit, cursor=cursor, max_cost_usd=max_cost_usd)
 
-    def search_posts(self, query: str, *, max_cost_usd: float, limit: int = 20) -> ProviderResult:
-        return self.run_task("search_posts", query=query, limit=limit, max_cost_usd=max_cost_usd)
+    def search_posts(
+        self,
+        query: str,
+        *,
+        max_cost_usd: float,
+        limit: int = 20,
+        cursor: str | None = None,
+    ) -> ProviderResult:
+        return self.run_task("search_posts", query=query, limit=limit, cursor=cursor, max_cost_usd=max_cost_usd)
 
     def read_owned_timeline(self, *, max_cost_usd: float, limit: int = 20) -> ProviderResult:
         return self.run_task("read_owned_timeline", limit=limit, max_cost_usd=max_cost_usd)
@@ -81,20 +96,63 @@ class XDataRouter:
     def read_mentions(self, *, max_cost_usd: float, limit: int = 20) -> ProviderResult:
         return self.run_task("read_mentions", limit=limit, max_cost_usd=max_cost_usd)
 
-    def read_thread(self, value: str, *, max_cost_usd: float, limit: int = 100) -> ProviderResult:
-        return self.run_task("read_thread", value=value, limit=limit, max_cost_usd=max_cost_usd)
+    def read_thread(
+        self,
+        value: str,
+        *,
+        max_cost_usd: float,
+        limit: int = 100,
+        cursor: str | None = None,
+    ) -> ProviderResult:
+        return self.run_task("read_thread", value=value, limit=limit, cursor=cursor, max_cost_usd=max_cost_usd)
 
-    def read_replies(self, value: str, *, max_cost_usd: float, limit: int = 100) -> ProviderResult:
-        return self.run_task("read_replies", value=value, limit=limit, max_cost_usd=max_cost_usd)
+    def read_replies(
+        self,
+        value: str,
+        *,
+        max_cost_usd: float,
+        limit: int = 100,
+        cursor: str | None = None,
+    ) -> ProviderResult:
+        return self.run_task("read_replies", value=value, limit=limit, cursor=cursor, max_cost_usd=max_cost_usd)
 
-    def read_quotes(self, value: str, *, max_cost_usd: float, limit: int = 100) -> ProviderResult:
-        return self.run_task("read_quotes", value=value, limit=limit, max_cost_usd=max_cost_usd)
+    def read_quotes(
+        self,
+        value: str,
+        *,
+        max_cost_usd: float,
+        limit: int = 100,
+        cursor: str | None = None,
+    ) -> ProviderResult:
+        return self.run_task("read_quotes", value=value, limit=limit, cursor=cursor, max_cost_usd=max_cost_usd)
 
-    def read_follow_graph(self, user: str, *, max_cost_usd: float, graph: str = "followers", limit: int = 100) -> ProviderResult:
-        return self.run_task("read_follow_graph", user=user, graph=graph, limit=limit, max_cost_usd=max_cost_usd)
+    def read_follow_graph(
+        self,
+        user: str,
+        *,
+        max_cost_usd: float,
+        graph: str = "followers",
+        limit: int = 100,
+        cursor: str | None = None,
+    ) -> ProviderResult:
+        return self.run_task(
+            "read_follow_graph",
+            user=user,
+            graph=graph,
+            limit=limit,
+            cursor=cursor,
+            max_cost_usd=max_cost_usd,
+        )
 
-    def collect_posts(self, query: str, *, max_cost_usd: float, limit: int = 100) -> ProviderResult:
-        return self.run_task("collect_posts", query=query, limit=limit, max_cost_usd=max_cost_usd)
+    def collect_posts(
+        self,
+        query: str,
+        *,
+        max_cost_usd: float,
+        limit: int = 100,
+        cursor: str | None = None,
+    ) -> ProviderResult:
+        return self.run_task("collect_posts", query=query, limit=limit, cursor=cursor, max_cost_usd=max_cost_usd)
 
     def status(self) -> dict[str, Any]:
         provider_status: dict[str, Any] = {}
@@ -246,7 +304,7 @@ class XDataRouter:
             if method is None:
                 continue
             try:
-                return method(**_task_kwargs(task, kwargs))
+                return method(**_filter_supported_kwargs(method, _task_kwargs(task, kwargs)))
             except Exception as exc:
                 return ProviderResult.error(
                     provider=getattr(provider, "name", provider.__class__.__name__),
@@ -265,7 +323,7 @@ class XDataRouter:
         if not callable(estimate_method):
             return None
         try:
-            return estimate_method(task, **_task_kwargs(task, kwargs))
+            return estimate_method(task, **_filter_supported_kwargs(estimate_method, _task_kwargs(task, kwargs)))
         except Exception:
             return None
 
@@ -355,22 +413,42 @@ def _task_kwargs(task: str, kwargs: dict[str, Any]) -> dict[str, Any]:
     if task == "fetch_urls":
         return {"values": kwargs["values"]}
     if task == "read_user_posts_recent":
-        return {"user": kwargs["user"], "limit": kwargs.get("limit", 20)}
+        return {"user": kwargs["user"], "limit": kwargs.get("limit", 20), "cursor": kwargs.get("cursor")}
     if task == "search_posts":
-        return {"query": kwargs["query"], "limit": kwargs.get("limit", 20)}
+        return {"query": kwargs["query"], "limit": kwargs.get("limit", 20), "cursor": kwargs.get("cursor")}
     if task in {"read_owned_timeline", "read_mentions"}:
         return {"limit": kwargs.get("limit", 20)}
     if task in {"read_thread", "read_replies", "read_quotes"}:
-        return {"value": kwargs["value"], "limit": kwargs.get("limit", 100)}
+        return {"value": kwargs["value"], "limit": kwargs.get("limit", 100), "cursor": kwargs.get("cursor")}
     if task == "read_follow_graph":
         return {
             "user": kwargs["user"],
             "graph": kwargs.get("graph", "followers"),
             "limit": kwargs.get("limit", 100),
+            "cursor": kwargs.get("cursor"),
         }
     if task == "collect_posts":
-        return {"query": kwargs["query"], "limit": kwargs.get("limit", 100)}
+        return {"query": kwargs["query"], "limit": kwargs.get("limit", 100), "cursor": kwargs.get("cursor")}
     return kwargs
+
+
+def _filter_supported_kwargs(method: Any, kwargs: dict[str, Any]) -> dict[str, Any]:
+    try:
+        signature = inspect.signature(method)
+    except (TypeError, ValueError):
+        return {key: value for key, value in kwargs.items() if value is not None}
+    if any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in signature.parameters.values()):
+        return {key: value for key, value in kwargs.items() if value is not None}
+    allowed = {
+        name
+        for name, parameter in signature.parameters.items()
+        if parameter.kind in {inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY}
+    }
+    return {
+        key: value
+        for key, value in kwargs.items()
+        if key in allowed and value is not None
+    }
 
 
 def _with_attempts(

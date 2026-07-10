@@ -24,13 +24,19 @@ server itself.
 - Create an MCP server named `x-data`.
 - Follow the provider-module and router design in
   `docs/architecture.md#provider-module-and-router-design`.
-- Expose only read-only tools:
-  - `x_search_posts`
+- Expose only read-only task-level tools:
+  - `x_fetch_urls`
   - `x_read_user_posts`
+  - `x_search_posts`
+  - `x_read_owned_timeline`
+  - `x_read_mentions`
   - `x_read_thread`
   - `x_read_replies`
-  - `x_fetch_urls`
+  - `x_read_quotes`
+  - `x_read_follow_graph`
+  - `x_collect_posts`
   - `x_data_status`
+  - `x_data_healthcheck`
 - Do not expose posting, liking, following, replying, browser navigation, or
   raw provider tools.
 - Do not expose a `provider` parameter to the model. Provider choice is
