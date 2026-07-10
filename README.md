@@ -19,6 +19,7 @@ Initial scope:
 - Search public X posts.
 - Read posts for a given user.
 - Read specific posts, threads, replies, and URLs.
+- Read published X Articles through their wrapper tweet share link.
 - Return structured, provenance-aware data.
 
 Out of scope:
@@ -65,6 +66,56 @@ Cost:
 
 - Paid
 - Actual cost depends on your X developer plan and the endpoints you use
+
+### GetXAPI
+
+GetXAPI is currently used only for published X Articles. This is a special
+case because X Articles are long-form content hosted on X itself, but they are
+not exposed through the normal post/thread read paths in this repo.
+
+The current implementation supports public article reads by wrapper tweet
+share link or wrapper tweet ID. In practice, this means you should use the
+normal X "Share" link for the article seed post, for example
+`https://x.com/<user>/status/<wrapper_tweet_id>`.
+
+Direct `x.com/i/article/<article_id>` URLs are not supported in v1.
+
+Cost:
+
+- `$0.001` per article read
+- Requires `GETXAPI_API_KEY`
+
+## X Articles
+
+X Articles are a special case in this project.
+
+Why:
+
+- An X Article is not a normal post.
+- Existing post tools such as `x_fetch_urls`, `x_read_thread`, and
+  `x_read_replies` do not return the article body itself.
+- Public article reads are currently handled by the dedicated
+  `x_read_article` tool through the GetXAPI provider.
+
+Use:
+
+- Supported input:
+  - wrapper tweet URL
+  - wrapper tweet ID
+- Not supported in v1:
+  - direct `x.com/i/article/...` URL
+  - raw article entity ID
+
+Output:
+
+- normalized structured article content
+- title
+- body text
+- author
+- timestamp
+- metrics
+- image URLs
+- content blocks
 
 ### Twikit
 
@@ -218,6 +269,7 @@ mcp_servers:
         - x_read_replies
         - x_read_quotes
         - x_read_follow_graph
+        - x_read_article
         - x_collect_posts
         - x_data_status
 ```
