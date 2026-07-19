@@ -11,8 +11,12 @@ if [[ -f "${HERMES_ENV_FILE}" ]]; then
     [[ "${line}" != *=* ]] && continue
     key=${line%%=*}
     value=${line#*=}
+    # Strip one layer of surrounding quotes; .env stores some values quoted
+    # and exporting them verbatim would leak the quote chars into the env.
+    value="${value%\"}"; value="${value#\"}"
+    value="${value%\'}"; value="${value#\'}"
     case "${key}" in
-      SOCIALDATA_API_KEY|X_OAUTH2_CLIENT_ID|X_OAUTH2_CLIENT_SECRET|X_OAUTH2_ACCESS_TOKEN|X_OAUTH2_REFRESH_TOKEN|X_CLIENT_ID|X_CLIENT_SECRET|X_ACCESS_TOKEN|X_REFRESH_TOKEN)
+      SOCIALDATA_API_KEY|GETXAPI_API_KEY|X_OAUTH2_CLIENT_ID|X_OAUTH2_CLIENT_SECRET|X_OAUTH2_ACCESS_TOKEN|X_OAUTH2_REFRESH_TOKEN|X_CLIENT_ID|X_CLIENT_SECRET|X_ACCESS_TOKEN|X_REFRESH_TOKEN)
         export "${key}=${value}"
         ;;
     esac

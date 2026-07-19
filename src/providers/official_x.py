@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from collections.abc import Callable
 from typing import Any
 
@@ -29,12 +30,34 @@ USER_GRAPH_MAX_RESULTS = 1000
 ClientFactory = Callable[[str], Any]
 
 
+def _strip_quotes(value: str | None) -> str | None:
+    if value and len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+        return value[1:-1]
+    return value
+
+
 def _env_value(primary: str, fallback: str | None = None) -> str | None:
-    value = os.getenv(primary)
+    value = _strip_quotes(os.getenv(primary))
     if value:
         return value
     if fallback:
-        return os.getenv(fallback)
+        fallback_val = _strip_quotes(os.getenv(fallback))
+        if fallback_val:
+            return fallback_val
+
+    # Fallback: try to load from .env file directly
+    env_path = Path("/home/ubuntu/.hermes/.env")
+    if env_path.exists():
+        content = env_path.read_text()
+        for line in content.splitlines():
+            line = line.strip()
+            if line and not line.startswith('#') and '=' in line:
+                key, val = line.split('=', 1)
+                if key == primary:
+                    return val.strip('"\'').strip()
+                if key == fallback:
+                    return val.strip('"\'').strip()
+
     return None
 
 
@@ -191,9 +214,9 @@ class OfficialXProvider:
     def _access_token(self) -> str | None:
         return _env_value("X_OAUTH2_ACCESS_TOKEN", "X_ACCESS_TOKEN")
 
-    def _client(self) -> tuple[Any | None, ProviderResult | None]:
-        token = self._access_token()
-        if not token:
+    def _client(self, token: str | None = None) -> tuple[Any | None, ProviderResult | None]:
+        access_token = token or self._access_token()
+        if not access_token:
             return None, ProviderResult.unavailable(
                 provider=self.name,
                 reason="auth_required",
@@ -207,7 +230,7 @@ class OfficialXProvider:
                 warnings=["install xdk or the official-x optional dependency"],
             )
         try:
-            return factory(token), None
+            return factory(access_token), None
         except Exception as exc:
             return None, ProviderResult.error(
                 provider=self.name,
@@ -215,12 +238,180 @@ class OfficialXProvider:
                 warnings=[str(exc)],
             )
 
+    def _refresh_access_token(self) -> bool:
+        """
+        Refresh the access token using the stored refresh token.
+        Returns True on success, False on failure.
+        """
+        import base64
+        import requests
+        from pathlib import Path
+
+        client_id = _env_value("X_OAUTH2_CLIENT_ID")
+        client_secret = _env_value("X_OAUTH2_CLIENT_SECRET")
+        refresh_token = _env_value("X_OAUTH2_REFRESH_TOKEN")
+
+        if not (client_id and client_secret and refresh_token):
+            return False
+
+        creds = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
+        try:
+            r = requests.post(
+                "https://api.x.com/2/oauth2/token",
+                headers={
+                    "Authorization": f"Basic {creds}",
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+                data={"grant_type": "refresh_token", "refresh_token": refresh_token},
+                timeout=15,
+            )
+        except Exception:
+            return False
+
+        if r.status_code != 200:
+            return False
+
+        data = r.json()
+        new_access = data.get("access_token")
+        new_refresh = data.get("refresh_token")
+
+        if not new_access:
+            return False
+
+        # Persist new tokens to .env
+        env_path = Path("/home/ubuntu/.hermes/.env")
+        if env_path.exists():
+            content = env_path.read_text()
+            lines = content.splitlines()
+            for i, line in enumerate(lines):
+                if line.startswith("X_OAUTH2_ACCESS_TOKEN="):
+                    lines[i] = f'X_OAUTH2_ACCESS_TOKEN="{new_access}"'
+                    break
+            else:
+                lines.append(f'X_OAUTH2_ACCESS_TOKEN="{new_access}"')
+
+            for i, line in enumerate(lines):
+                if line.startswith("X_ACCESS_TOKEN="):
+                    lines[i] = f'X_ACCESS_TOKEN="{new_access}"'
+                    break
+            else:
+                lines.append(f'X_ACCESS_TOKEN="{new_access}"')
+
+            if new_refresh:
+                for i, line in enumerate(lines):
+                    if line.startswith("X_OAUTH2_REFRESH_TOKEN="):
+                        lines[i] = f'X_OAUTH2_REFRESH_TOKEN="{new_refresh}"'
+                        break
+                else:
+                    lines.append(f'X_OAUTH2_REFRESH_TOKEN="{new_refresh}"')
+
+                for i, line in enumerate(lines):
+                    if line.startswith("X_REFRESH_TOKEN="):
+                        lines[i] = f'X_REFRESH_TOKEN="{new_refresh}"'
+                        break
+                else:
+                    lines.append(f'X_REFRESH_TOKEN="{new_refresh}"')
+
+            env_path.write_text("\n".join(lines) + "\n")
+
+        return True
+
+    def _ensure_authenticated(self) -> tuple[Any | None, ProviderResult | None]:
+        """
+        Get authenticated client, refreshing token if needed.
+        Returns (client, error_result) where error_result is None on success.
+        """
+        # First try to get client normally
+        client, unavailable = self._client()
+        if unavailable:
+            return client, unavailable
+
+        assert client is not None
+
+        # Check if the token is still valid by making a lightweight call
+        try:
+            self._get_me_id(client)
+            # Token is still valid
+            return client, None
+        except Exception as exc:
+            # Token might be expired - try to refresh
+            refresh_success = self._refresh_access_token()
+            if not refresh_success:
+                # Refresh failed, return the error from the validation attempt
+                return None, ProviderResult.error(
+                    provider=self.name,
+                    reason="auth_token_refresh_failed",
+                    warnings=["Failed to refresh X authentication token", str(exc)],
+                )
+
+            # Refresh succeeded - get fresh client with new token
+            client, error = self._client()
+            if error:
+                return client, error
+
+            assert client is not None
+
+            # Verify the new token works
+            try:
+                self._get_me_id(client)
+                return client, None
+            except Exception as retry_exc:
+                # New token also invalid
+                return None, ProviderResult.error(
+                    provider=self.name,
+                    reason="auth_token_validation_failed",
+                    warnings=["Refreshed token is still invalid", str(retry_exc)],
+                )
+
+        return client, None
+
+    def _retry_with_refresh(self, api_call: Callable[[], Any]) -> tuple[Any, bool]:
+        """
+        Execute an API call with automatic token refresh on 401 errors.
+        Returns (result, was_refreshed) where was_refreshed is True if token was refreshed.
+        """
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                # Ensure we have a valid token
+                client, unavailable = self._ensure_authenticated()
+                if unavailable:
+                    raise Exception(f"X API unavailable: {unavailable.reason}")
+
+                # Execute the API call
+                result = api_call()
+                return result, False
+
+            except Exception as exc:
+                # Check if this is a 401 auth error
+                error_str = str(exc)
+                if "401" not in error_str and "unauthorized" not in error_str.lower():
+                    # Not an auth error, re-raise
+                    raise
+
+                # Check if we should retry (first attempt failed, second attempt will work after refresh)
+                if attempt == 0:
+                    # This is the first failure - try to refresh token
+                    refresh_success = self._refresh_access_token()
+                    if not refresh_success:
+                        # Refresh failed, re-raise the original error
+                        raise Exception(f"Token refresh failed: {exc}")
+
+                    # Continue to next iteration (will retry with new token)
+                    continue
+                else:
+                    # This is the second failure after refresh - give up
+                    raise Exception(f"API call failed after token refresh: {exc}")
+
+        # Should never reach here
+        raise Exception("Unexpected error in _retry_with_refresh")
+
     def status(self) -> dict[str, Any]:
         return {
             "auth_required": True,
             "auth_present": bool(self._access_token()),
             "sdk_available": self._client_factory is not None or _load_xdk_client_factory() is not None,
-            "token_refresh": "deferred",
+            "token_refresh": "automatic",
             "read_only": True,
             "supports_tasks": [
                 "fetch_urls",
@@ -247,7 +438,7 @@ class OfficialXProvider:
         return CostEstimate(amount_usd=round(units, 6), basis=basis)
 
     def fetch_urls(self, values: list[str]) -> ProviderResult:
-        client, unavailable = self._client()
+        client, unavailable = self._ensure_authenticated()
         if unavailable:
             return unavailable
         assert client is not None
@@ -255,21 +446,25 @@ class OfficialXProvider:
         posts: list[Post] = []
         warnings: list[str] = []
         tweet_fields = ["created_at", "public_metrics", "text", "author_id"]
-        for value in values:
+
+        def fetch_single_post(value: str) -> list[Post] | None:
             post_id = extract_post_id(value)
             if not post_id:
                 warnings.append(f"invalid_post_reference:{value}")
-                continue
+                return None
             try:
                 response = client.posts.get_by_id(id=post_id, tweet_fields=tweet_fields)
+                items = [_post_from_obj(item) for item in _data_items(response)]
+                return [item for item in items if item is not None]
             except Exception as exc:
-                return ProviderResult.error(
-                    provider=self.name,
-                    reason="api_error",
-                    warnings=[str(exc), *warnings],
-                )
-            items = [_post_from_obj(item) for item in _data_items(response)]
-            posts.extend([item for item in items if item is not None])
+                return None
+
+        # Use retry logic for each post fetch
+        for value in values:
+            result = self._retry_with_refresh(lambda: fetch_single_post(value))
+            if result is not None:
+                posts.extend(result)
+
         if posts:
             return ProviderResult.ok(
                 provider=self.name,
@@ -285,7 +480,7 @@ class OfficialXProvider:
         return ProviderResult.empty(provider=self.name)
 
     def read_user_posts(self, user: str, *, limit: int = 20) -> ProviderResult:
-        client, unavailable = self._client()
+        client, unavailable = self._ensure_authenticated()
         if unavailable:
             return unavailable
         assert client is not None
@@ -293,42 +488,52 @@ class OfficialXProvider:
         handle_or_id = normalize_handle(user)
         if not handle_or_id:
             return ProviderResult.error(provider=self.name, reason="missing_user")
-        try:
+
+        def resolve_and_fetch() -> Any:
             user_id = handle_or_id if handle_or_id.isdigit() else self._resolve_user_id(client, handle_or_id)
-            posts = self._collect_pages(
+            return self._collect_pages(
                 client.users.get_posts,
                 {"id": user_id},
                 limit=limit,
                 min_results=USER_POSTS_MIN_RESULTS,
             )
+
+        try:
+            posts = self._retry_with_refresh(resolve_and_fetch)
         except Exception as exc:
             return ProviderResult.error(provider=self.name, reason="api_error", warnings=[str(exc)])
+
         if posts:
             return ProviderResult.ok(
                 provider=self.name,
                 items=posts,
                 cost=CostEstimate(
                     amount_usd=len(posts) * POST_READ_COST_USD,
-                    basis="$0.005/post read; may be $0.001 owned read for owned account",
+                    basis="$0.005/post read",
                 ),
             )
         return ProviderResult.empty(provider=self.name)
 
     def read_owned_timeline(self, *, limit: int = 20) -> ProviderResult:
-        client, unavailable = self._client()
+        client, unavailable = self._ensure_authenticated()
         if unavailable:
             return unavailable
         assert client is not None
-        try:
+
+        def fetch_timeline() -> Any:
             user_id = self._get_me_id(client)
-            posts = self._collect_pages(
+            return self._collect_pages(
                 client.users.get_timeline,
                 {"id": user_id},
                 limit=limit,
                 min_results=TIMELINE_MIN_RESULTS,
             )
+
+        try:
+            posts = self._retry_with_refresh(fetch_timeline)
         except Exception as exc:
             return ProviderResult.error(provider=self.name, reason="api_error", warnings=[str(exc)])
+
         if posts:
             return ProviderResult.ok(
                 provider=self.name,
@@ -341,20 +546,25 @@ class OfficialXProvider:
         return ProviderResult.empty(provider=self.name)
 
     def read_mentions(self, *, limit: int = 20) -> ProviderResult:
-        client, unavailable = self._client()
+        client, unavailable = self._ensure_authenticated()
         if unavailable:
             return unavailable
         assert client is not None
-        try:
+
+        def fetch_mentions() -> Any:
             user_id = self._get_me_id(client)
-            posts = self._collect_pages(
+            return self._collect_pages(
                 client.users.get_mentions,
                 {"id": user_id},
                 limit=limit,
                 min_results=MENTIONS_MIN_RESULTS,
             )
+
+        try:
+            posts = self._retry_with_refresh(fetch_mentions)
         except Exception as exc:
             return ProviderResult.error(provider=self.name, reason="api_error", warnings=[str(exc)])
+
         if posts:
             return ProviderResult.ok(
                 provider=self.name,
@@ -367,21 +577,26 @@ class OfficialXProvider:
         return ProviderResult.empty(provider=self.name)
 
     def search_recent(self, query: str, *, limit: int = 20) -> ProviderResult:
-        client, unavailable = self._client()
+        client, unavailable = self._ensure_authenticated()
         if unavailable:
             return unavailable
         assert client is not None
         if not query.strip():
             return ProviderResult.error(provider=self.name, reason="missing_query")
-        try:
-            posts = self._collect_pages(
+
+        def perform_search() -> Any:
+            return self._collect_pages(
                 client.posts.search_recent,
                 {"query": query},
                 limit=limit,
                 min_results=SEARCH_MIN_RESULTS,
             )
+
+        try:
+            posts = self._retry_with_refresh(perform_search)
         except Exception as exc:
             return ProviderResult.error(provider=self.name, reason="api_error", warnings=[str(exc)])
+
         if posts:
             return ProviderResult.ok(
                 provider=self.name,
@@ -425,7 +640,7 @@ class OfficialXProvider:
         post_id = extract_post_id(value)
         if not post_id:
             return ProviderResult.error(provider=self.name, reason="invalid_post_reference")
-        client, unavailable = self._client()
+        client, unavailable = self._ensure_authenticated()
         if unavailable:
             return unavailable
         assert client is not None
@@ -453,7 +668,7 @@ class OfficialXProvider:
     def read_follow_graph(self, user: str, *, graph: str = "followers", limit: int = 100) -> ProviderResult:
         if graph not in {"followers", "following"}:
             return ProviderResult.error(provider=self.name, reason="invalid_graph")
-        client, unavailable = self._client()
+        client, unavailable = self._ensure_authenticated()
         if unavailable:
             return unavailable
         assert client is not None
@@ -482,7 +697,7 @@ class OfficialXProvider:
         return ProviderResult.empty(provider=self.name)
 
     def _search_recent_query(self, query: str, *, limit: int) -> ProviderResult:
-        client, unavailable = self._client()
+        client, unavailable = self._ensure_authenticated()
         if unavailable:
             return unavailable
         assert client is not None

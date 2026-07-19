@@ -158,7 +158,7 @@ def run_smoke(args: argparse.Namespace) -> dict[str, Any]:
             provider.read_quotes(first_post_id, limit=max(5, args.limit))
         )
         results["router.fetch_urls"] = summarize_result(
-            router.fetch_urls([f"https://x.com/i/web/status/{first_post_id}"])
+            router.fetch_urls([f"https://x.com/i/web/status/{first_post_id}"], max_cost_usd=0.05)
         )
 
     results["socialdata.search_posts"] = summarize_result(provider.search_posts(args.search_query, limit=args.limit))
@@ -168,7 +168,7 @@ def run_smoke(args: argparse.Namespace) -> dict[str, Any]:
     results["socialdata.collect_posts"] = summarize_result(
         provider.collect_posts(args.collect_query, limit=max(5, args.limit))
     )
-    results["router.search_posts"] = summarize_result(router.search_posts(args.search_query, limit=args.limit))
+    results["router.search_posts"] = summarize_result(router.search_posts(args.search_query, limit=args.limit, max_cost_usd=0.05))
     return results
 
 
